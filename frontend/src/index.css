@@ -349,3 +349,64 @@
 .anim-banner-pop {
   animation: bastionBannerPop 160ms ease-out forwards;
 }
+
+/* ============================================================================
+   PRINT / PDF EXPORT STYLES (@media print — 3x3 TCG Cards per A4 Sheet)
+   ============================================================================ */
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 0;
+  }
+
+  html,
+  body,
+  #root {
+    background: #ffffff !important;
+    color: #000000 !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  .deck-print-modal-backdrop {
+    position: static !important;
+    inset: auto !important;
+    background: #ffffff !important;
+    backdrop-filter: none !important;
+    overflow: visible !important;
+    display: block !important;
+  }
+
+  .deck-print-sheets-container {
+    overflow: visible !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    display: block !important;
+  }
+
+  .deck-print-page {
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    margin: 0 auto !important;
+    width: 210mm !important;
+    height: 297mm !important;
+    page-break-after: always !important;
+    break-after: page !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  .deck-print-page:last-child {
+    page-break-after: auto !important;
+    break-after: auto !important;
+  }
+}

@@ -99,7 +99,7 @@ export const App: React.FC = () => {
   return (
     <div className="min-h-screen flex flex-col bg-[#12100e] text-[#e7dfd3]">
       {/* Top Wrought-Iron & Bronze Navigation Header */}
-      <header className="border-b border-[#574c3f] bg-gradient-to-b from-[#231d19] to-[#171310] sticky top-0 z-40 shadow-[0_4px_20px_rgba(0,0,0,0.85)]">
+      <header className="no-print border-b border-[#574c3f] bg-gradient-to-b from-[#231d19] to-[#171310] sticky top-0 z-40 shadow-[0_4px_20px_rgba(0,0,0,0.85)]">
         <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between gap-4">
           <div
             onClick={() => {

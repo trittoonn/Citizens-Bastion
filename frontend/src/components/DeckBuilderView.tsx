@@ -8,6 +8,7 @@ import {
   FileCode2,
   Layers,
   Plus,
+  Printer,
   RotateCcw,
   Settings2,
   Sparkles,
@@ -38,6 +39,7 @@ import {
 import { CardView, renderCardIcon } from './CardView';
 import { CardArt } from './CardArt';
 import { CardCreatorModal } from './CardCreatorModal';
+import { DeckPrintModal } from './DeckPrintModal';
 
 export const DeckBuilderView: React.FC = () => {
   const [cards, setCards] = useState<CardDefinition[]>(() => getAllCards());
@@ -50,6 +52,7 @@ export const DeckBuilderView: React.FC = () => {
   );
   const [showConstraintsPanel, setShowConstraintsPanel] = useState(false);
   const [showCardModal, setShowCardModal] = useState(false);
+  const [showPrintModal, setShowPrintModal] = useState(false);
   const [filterType, setFilterType] = useState<'all' | 'citizen' | 'event' | 'custom'>('all');
 
   // Share Code (Export / Import) Studio State
@@ -275,7 +278,7 @@ export const DeckBuilderView: React.FC = () => {
   return (
     <div className="max-w-7xl mx-auto px-4 py-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
       {/* Left 8 Columns: Card Collection & Forge */}
-      <div className="lg:col-span-8 space-y-5">
+      <div className="no-print lg:col-span-8 space-y-5">
         <div className="bastion-panel rounded-lg p-5 flex flex-wrap items-center justify-between gap-4">
           <div>
             <h2 className="font-display text-lg font-bold text-[#f3ead8] flex items-center gap-2">
@@ -400,35 +403,46 @@ export const DeckBuilderView: React.FC = () => {
       </div>
 
       {/* Right 4 Columns: Active Deck & Hearthstone/MTG Arena Card Bars */}
-      <div className="lg:col-span-4 space-y-4">
+      <div className="no-print lg:col-span-4 space-y-4">
         <div className="bastion-panel rounded-lg p-4 space-y-4 sticky top-20">
           <div className="flex items-center justify-between gap-2 border-b border-[#574c3f] pb-3">
             <h3 className="font-display text-base font-bold text-[#f3ead8]">
               Códice de Mazo
             </h3>
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 flex-wrap justify-end">
               {activeDeck && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    const code = exportDeckToCode(activeDeck);
-                    copyToClipboard(code, 'active_deck_quick');
-                  }}
-                  title="Copiar código serializado de este mazo (incluye sus cartas)"
-                  className="btn-war-iron px-2 py-1 rounded text-[10px] flex items-center gap-1"
-                >
-                  {copiedId === 'active_deck_quick' ? (
-                    <>
-                      <Check className="w-3 h-3 text-[#4ade80]" />
-                      <span className="text-[#86efac]">Copiado</span>
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="w-3 h-3 text-[#f3d46b]" />
-                      <span>Código Mazo</span>
-                    </>
-                  )}
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setShowPrintModal(true)}
+                    title="Exportar todas las instancias de este mazo como PDF listo para imprimir"
+                    className="btn-war-iron border-[#c59b27]/80 px-2 py-1 rounded text-[10px] text-[#f3d46b] flex items-center gap-1"
+                  >
+                    <Printer className="w-3 h-3 text-[#f3d46b]" />
+                    <span>PDF / Imprimir</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const code = exportDeckToCode(activeDeck);
+                      copyToClipboard(code, 'active_deck_quick');
+                    }}
+                    title="Copiar código serializado de este mazo (incluye sus cartas)"
+                    className="btn-war-iron px-2 py-1 rounded text-[10px] flex items-center gap-1"
+                  >
+                    {copiedId === 'active_deck_quick' ? (
+                      <>
+                        <Check className="w-3 h-3 text-[#4ade80]" />
+                        <span className="text-[#86efac]">Copiado</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3 h-3 text-[#f3d46b]" />
+                        <span>Código Mazo</span>
+                      </>
+                    )}
+                  </button>
+                </>
               )}
               <button
                 onClick={() => setShowConstraintsPanel((v) => !v)}
@@ -677,6 +691,13 @@ export const DeckBuilderView: React.FC = () => {
         <CardCreatorModal
           onClose={() => setShowCardModal(false)}
           onSave={handleSaveNewCard}
+        />
+      )}
+
+      {showPrintModal && activeDeck && (
+        <DeckPrintModal
+          deck={activeDeck}
+          onClose={() => setShowPrintModal(false)}
         />
       )}
 
