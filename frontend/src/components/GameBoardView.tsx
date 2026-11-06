@@ -24,6 +24,7 @@ import {
 import {
   ActionRequest,
   ActionStepSnapshot,
+  AnimationSpeed,
   CardDefinition,
   CardInstance,
   GamePhase,
@@ -160,6 +161,26 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
   const [activeStep, setActiveStep] = useState<ActionStepSnapshot | null>(null);
   const [seqTotalCount, setSeqTotalCount] = useState(0);
   const [seqCurrentIdx, setSeqCurrentIdx] = useState(0);
+  const [animSpeed, setAnimSpeed] = useState<AnimationSpeed>(() => {
+    try {
+      const saved = localStorage.getItem('cb_anim_speed_v1');
+      if (saved === 'slow' || saved === 'medium' || saved === 'fast') {
+        return saved;
+      }
+    } catch {
+      // Ignore storage access errors
+    }
+    return 'medium';
+  });
+
+  const handleSetAnimSpeed = (speed: AnimationSpeed) => {
+    setAnimSpeed(speed);
+    try {
+      localStorage.setItem('cb_anim_speed_v1', speed);
+    } catch {
+      // Ignore storage access errors
+    }
+  };
 
   // Selection states during MAIN phase
   const [selectedHandCardId, setSelectedHandCardId] = useState<string | null>(null);
@@ -219,7 +240,7 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
     setSeqCurrentIdx((c) => c + 1);
   }, [activeStep, animQueue]);
 
-  // 2) Automatically advance activeStep after a brisk, readable duration
+  // 2) Automatically advance activeStep according to the chosen animation speed
   // (Kept in a separate effect from animQueue so dequeueing never cancels the timer!)
   useEffect(() => {
     if (!activeStep) {
@@ -229,20 +250,26 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
     const isMyAction = activeStep.event.actorId === playerId;
     const isTurnBanner = activeStep.event.type === 'TURN_START';
     const isEventShowcase = activeStep.event.type === 'PLAY_EVENT';
-    const durationMs = isTurnBanner
-      ? 380
-      : isEventShowcase
-      ? 620
-      : isMyAction
+
+    const baseDurationMs = isTurnBanner
       ? 450
-      : 560;
+      : isEventShowcase
+      ? 720
+      : isMyAction
+      ? 520
+      : 660;
+
+    const speedMultiplier =
+      animSpeed === 'slow' ? 1.8 : animSpeed === 'fast' ? 0.52 : 1.0;
+
+    const durationMs = Math.round(baseDurationMs * speedMultiplier);
 
     const timer = setTimeout(() => {
       setActiveStep(null);
     }, durationMs);
 
     return () => clearTimeout(timer);
-  }, [activeStep, playerId]);
+  }, [activeStep, playerId, animSpeed]);
 
   const skipAnimations = () => {
     setAnimQueue([]);
@@ -488,8 +515,14 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
     Math.round(((view.opponent?.developmentPoints || 0) / pointsGoal) * 100)
   );
 
+  const cssAnimDuration =
+    animSpeed === 'slow' ? '780ms' : animSpeed === 'fast' ? '250ms' : '460ms';
+
   return (
-    <div className="h-screen w-screen overflow-hidden flex flex-col bg-[#0e0c0a] text-[#e7dfd3] select-none relative">
+    <div
+      style={{ '--anim-duration': cssAnimDuration } as React.CSSProperties}
+      className="h-screen w-screen overflow-hidden flex flex-col bg-[#0e0c0a] text-[#e7dfd3] select-none relative"
+    >
       {/* =====================================================================
           1. PROMINENT GAME HUD HEADER (Facing Shields Victory Meter 0/10)
          ===================================================================== */}
@@ -750,13 +783,13 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
                 return (
                   <div
                     key={zone.id}
-                    className={`min-h-0 rounded px-3 flex items-center justify-between gap-2 relative overflow-hidden transition ${getZoneSurfaceClasses(
+                    className={`min-h-0 rounded px-3 flex items-center justify-between gap-2 relative transition ${getZoneSurfaceClasses(
                       zone.id,
                       isClosestAttackRow
                     )}`}
                   >
-                    {/* Centered Background Watermark SVG */}
-                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                    {/* Centered Background Watermark SVG (Clipped strictly inside the rounded row background) */}
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none overflow-hidden rounded">
                       <ZoneWatermark zone={zone.id} />
                     </div>
 
@@ -770,8 +803,8 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
                       </span>
                     </div>
 
-                    {/* Units in Row */}
-                    <div className="flex-1 flex items-center justify-center gap-3 overflow-x-auto py-0.5 relative z-10">
+                    {/* Units in Row (overflow-visible so shields, Zzz badges & hover/anim glows are never clipped!) */}
+                    <div className="flex-1 flex items-center justify-center gap-2.5 overflow-visible px-2 py-1 relative z-10">
                       {cards.map((inst) => {
                         const isPromptTarget =
                           !isAnimatingMultiStep &&
@@ -964,13 +997,13 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
                         });
                       }
                     }}
-                    className={`min-h-0 rounded px-3 flex items-center justify-between gap-2 relative overflow-hidden transition ${getZoneSurfaceClasses(
+                    className={`min-h-0 rounded px-3 flex items-center justify-between gap-2 relative transition ${getZoneSurfaceClasses(
                       zone.id,
                       isInteractiveRow
                     )}`}
                   >
-                    {/* Centered Background Watermark SVG */}
-                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                    {/* Centered Background Watermark SVG (Clipped strictly inside the rounded row background) */}
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none overflow-hidden rounded">
                       <ZoneWatermark zone={zone.id} />
                     </div>
 
@@ -984,8 +1017,8 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
                       </span>
                     </div>
 
-                    {/* Units in Row */}
-                    <div className="flex-1 flex items-center justify-center gap-3 overflow-x-auto py-0.5 relative z-10">
+                    {/* Units in Row (overflow-visible so shields, Zzz badges & hover/anim glows are never clipped!) */}
+                    <div className="flex-1 flex items-center justify-center gap-2.5 overflow-visible px-2 py-1 relative z-10">
                       {cards.map((inst) => {
                         const isPromptTarget =
                           !isAnimatingMultiStep &&
@@ -1080,8 +1113,8 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
               </span>
             </div>
 
-            {/* Center: Fanned CCG Hand sitting strictly inside the 144px dock */}
-            <div className="flex-1 flex items-center justify-center -space-x-2 overflow-x-auto py-0.5">
+            {/* Center: Fanned CCG Hand sitting strictly inside the 144px dock (overflow-visible so rotated/hovered borders never clip) */}
+            <div className="flex-1 flex items-center justify-center -space-x-2 overflow-visible py-1.5 px-3">
               {handCards.map((inst, idx) => {
                 const isMulliganSelected =
                   view.phase === 'MULLIGAN' &&
@@ -1281,6 +1314,61 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
                 >
                   {view.movesRemaining} disp.
                 </span>
+              </div>
+
+              {/* Animation Speed Control (3 Buttons: Lento / Medio / Rápido + Slider) */}
+              <div className="pt-2 border-t border-[#3a322a] space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="font-display font-bold text-[#d6c7b8] text-[9.5px] uppercase">
+                    Velocidad Animación
+                  </span>
+                  <span className="font-display text-[9px] text-[#f3d46b] font-bold uppercase">
+                    {animSpeed === 'slow'
+                      ? 'Lento'
+                      : animSpeed === 'fast'
+                      ? 'Rápido'
+                      : 'Medio'}
+                  </span>
+                </div>
+
+                <input
+                  type="range"
+                  min={0}
+                  max={2}
+                  step={1}
+                  aria-label="Velocidad de las animaciones"
+                  value={animSpeed === 'slow' ? 0 : animSpeed === 'medium' ? 1 : 2}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    handleSetAnimSpeed(
+                      v === 0 ? 'slow' : v === 1 ? 'medium' : 'fast'
+                    );
+                  }}
+                  className="w-full h-1.5 accent-[#f3d46b] bg-[#26211d] rounded-lg cursor-pointer"
+                />
+
+                <div className="grid grid-cols-3 gap-1">
+                  {(
+                    [
+                      { id: 'slow', label: 'Lento' },
+                      { id: 'medium', label: 'Medio' },
+                      { id: 'fast', label: 'Rápido' },
+                    ] as const
+                  ).map((opt) => (
+                    <button
+                      type="button"
+                      key={opt.id}
+                      onClick={() => handleSetAnimSpeed(opt.id)}
+                      className={`py-0.5 rounded-sm font-display text-[9px] font-bold border transition ${
+                        animSpeed === opt.id
+                          ? 'bg-[#2b2216] border-[#f3d46b] text-[#fef08a] shadow-[inset_0_0_8px_rgba(243,212,107,0.25)]'
+                          : 'bg-[#1a1613] border-[#3a322a] text-[#8c7e70] hover:border-[#6b5a48] hover:text-[#d6c7b8]'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
 

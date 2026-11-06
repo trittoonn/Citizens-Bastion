@@ -289,4 +289,46 @@ func TestAIMatchDifficultiesFlow(t *testing.T) {
 				diff, len(afterEnd.View.RecentSteps))
 		}
 	}
+
+	// Test StartingPlayer = "ai" (AI goes first right after human Mulligan)
+	rulesAIFirst := game.DefaultRulesConfig()
+	rulesAIFirst.StartingPlayer = game.StartingPlayerGuest
+	createAIFirstBody, _ := json.Marshal(map[string]any{
+		"gameName":     "IA Empieza Primero",
+		"playerId":     "human_1",
+		"playerName":   "Comandante",
+		"vsAi":         true,
+		"aiDifficulty": game.AIDifficultyMedium,
+		"rules":        rulesAIFirst,
+	})
+	resp, err := http.Post(ts.URL+"/api/lobbies", "application/json", bytes.NewReader(createAIFirstBody))
+	if err != nil || resp.StatusCode != http.StatusCreated {
+		t.Fatalf("POST /api/lobbies (AI first) failed: %v", err)
+	}
+	var createAIFirstRes struct {
+		Lobby lobby.LobbySummary  `json:"lobby"`
+		View  game.PlayerGameView `json:"view"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&createAIFirstRes)
+	resp.Body.Close()
+
+	mullBody, _ := json.Marshal(lobby.ActionRequest{
+		PlayerID: "human_1",
+		Type:     lobby.ActionMulligan,
+	})
+	resp, err = http.Post(ts.URL+"/api/lobbies/"+createAIFirstRes.Lobby.ID+"/action", "application/json", bytes.NewReader(mullBody))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("human mulligan (AI first) failed: %v", err)
+	}
+	var afterMullAIFirst struct {
+		View game.PlayerGameView `json:"view"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&afterMullAIFirst)
+	resp.Body.Close()
+
+	// Since AI started Turn 1, AI already completed Turn 1 and passed Turn 2 to human_1!
+	if afterMullAIFirst.View.TurnNumber != 2 || !afterMullAIFirst.View.IsYourTurn {
+		t.Fatalf("expected AI to take Turn 1 and pass Turn 2 to human, got turn=%d isYourTurn=%v",
+			afterMullAIFirst.View.TurnNumber, afterMullAIFirst.View.IsYourTurn)
+	}
 }

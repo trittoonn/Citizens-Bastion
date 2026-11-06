@@ -15,6 +15,7 @@ import {
   GameRulesConfig,
   LobbySummary,
   PlayerGameView,
+  StartingPlayerMode,
   VitalityMode,
 } from '../types/game';
 import { DEFAULT_RULES_CONFIG } from '../services/defaults';
@@ -73,6 +74,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
   const [gameName, setGameName] = useState('');
   const [vsAi, setVsAi] = useState(false);
   const [aiDifficulty, setAiDifficulty] = useState<Exclude<AIDifficulty, ''>>('medium');
+  const [startingPlayer, setStartingPlayer] = useState<StartingPlayerMode>('player');
   const [vitalityMode, setVitalityMode] = useState<VitalityMode>('dynamic');
   const [retaliationDamage, setRetaliationDamage] = useState<boolean>(false);
   const [pointsToWin, setPointsToWin] = useState(10);
@@ -122,6 +124,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
         ...DEFAULT_RULES_CONFIG,
         vitalityMode,
         retaliationDamage,
+        startingPlayer: vsAi ? startingPlayer : 'player',
         pointsToWin,
         deckConstraints: {
           ...localConstraints,
@@ -281,37 +284,68 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
               </div>
             </div>
 
-            {/* AI Difficulty Picker */}
+            {/* AI Difficulty & Starting Player Picker */}
             {vsAi && (
-              <div className="space-y-2 p-3.5 rounded bg-[#16120f] border border-[#6e5a3e]">
-                <label className="block font-display text-xs font-bold text-[#e3c158]">
-                  Rango y Dificultad de la IA
-                </label>
-                <div className="grid grid-cols-1 gap-2">
-                  {AI_DIFFICULTY_OPTIONS.map((opt) => (
-                    <button
-                      type="button"
-                      key={opt.id}
-                      onClick={() => setAiDifficulty(opt.id)}
-                      className={`text-left p-2.5 rounded border transition ${
-                        aiDifficulty === opt.id
-                          ? 'bg-[#2b2216] border-[#c59b27] text-[#f3ead8] shadow-[inset_0_0_14px_rgba(197,155,39,0.2)]'
-                          : 'bg-[#120f0d] border-[#3a322a] text-[#a89b8c] hover:border-[#574c3f]'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="font-display text-xs font-bold text-[#e3c158]">
-                          {opt.title}
-                        </span>
-                        <span className="text-[10px] font-display uppercase text-[#a89b8c]">
-                          {opt.subtitle}
-                        </span>
-                      </div>
-                      <p className="font-serif text-xs text-[#d6c7b8] mt-0.5 leading-snug">
-                        {opt.description}
-                      </p>
-                    </button>
-                  ))}
+              <div className="space-y-3.5 p-3.5 rounded bg-[#16120f] border border-[#6e5a3e]">
+                <div className="space-y-2">
+                  <label className="block font-display text-xs font-bold text-[#e3c158]">
+                    Rango y Dificultad de la IA
+                  </label>
+                  <div className="grid grid-cols-1 gap-2">
+                    {AI_DIFFICULTY_OPTIONS.map((opt) => (
+                      <button
+                        type="button"
+                        key={opt.id}
+                        onClick={() => setAiDifficulty(opt.id)}
+                        className={`text-left p-2.5 rounded border transition ${
+                          aiDifficulty === opt.id
+                            ? 'bg-[#2b2216] border-[#c59b27] text-[#f3ead8] shadow-[inset_0_0_14px_rgba(197,155,39,0.2)]'
+                            : 'bg-[#120f0d] border-[#3a322a] text-[#a89b8c] hover:border-[#574c3f]'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="font-display text-xs font-bold text-[#e3c158]">
+                            {opt.title}
+                          </span>
+                          <span className="text-[10px] font-display uppercase text-[#a89b8c]">
+                            {opt.subtitle}
+                          </span>
+                        </div>
+                        <p className="font-serif text-xs text-[#d6c7b8] mt-0.5 leading-snug">
+                          {opt.description}
+                        </p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Starting Player Selector (Empiezo Yo / Empieza la IA / Aleatorio) */}
+                <div className="pt-2.5 border-t border-[#463c32] space-y-1.5">
+                  <label className="block font-display text-xs font-bold text-[#e3c158]">
+                    ¿Quién empieza la partida? (Turno 1)
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {(
+                      [
+                        { id: 'player', label: 'Empiezo Yo' },
+                        { id: 'ai', label: 'Empieza la IA' },
+                        { id: 'random', label: 'Aleatorio' },
+                      ] as const
+                    ).map((opt) => (
+                      <button
+                        type="button"
+                        key={opt.id}
+                        onClick={() => setStartingPlayer(opt.id)}
+                        className={`py-2 px-2 rounded border font-display text-[11px] font-bold transition ${
+                          startingPlayer === opt.id
+                            ? 'bg-[#2b2216] border-[#c59b27] text-[#fef08a] shadow-[inset_0_0_12px_rgba(197,155,39,0.28)]'
+                            : 'bg-[#120f0d] border-[#3a322a] text-[#a89b8c] hover:border-[#6e5d4f]'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
             )}

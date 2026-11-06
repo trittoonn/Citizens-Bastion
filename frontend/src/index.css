@@ -294,56 +294,56 @@
 }
 
 .anim-card-summon {
-  animation: bastionSummonSlam 440ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation: bastionSummonSlam var(--anim-duration, 460ms) cubic-bezier(0.22, 1, 0.36, 1) forwards;
   box-shadow: 0 0 26px rgba(243, 212, 107, 0.9) !important;
   z-index: 30;
 }
 
 .anim-card-march,
 .anim-march-up {
-  animation: bastionMarchUp 420ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation: bastionMarchUp var(--anim-duration, 460ms) cubic-bezier(0.22, 1, 0.36, 1) forwards;
   box-shadow: 0 0 24px rgba(227, 193, 88, 0.85) !important;
   z-index: 30;
 }
 
 .anim-march-down {
-  animation: bastionMarchDown 420ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation: bastionMarchDown var(--anim-duration, 460ms) cubic-bezier(0.22, 1, 0.36, 1) forwards;
   box-shadow: 0 0 24px rgba(227, 193, 88, 0.85) !important;
   z-index: 30;
 }
 
 .anim-attack-up {
-  animation: bastionAttackUp 450ms cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+  animation: bastionAttackUp var(--anim-duration, 460ms) cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
   box-shadow: 0 0 28px rgba(248, 113, 113, 0.95) !important;
   z-index: 35;
 }
 
 .anim-attack-down {
-  animation: bastionAttackDown 450ms cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+  animation: bastionAttackDown var(--anim-duration, 460ms) cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
   box-shadow: 0 0 28px rgba(248, 113, 113, 0.95) !important;
   z-index: 35;
 }
 
 .anim-damage-shake {
-  animation: bastionDamageShake 440ms ease-in-out forwards;
+  animation: bastionDamageShake var(--anim-duration, 460ms) ease-in-out forwards;
   box-shadow: 0 0 30px rgba(220, 38, 38, 0.95) !important;
   z-index: 35;
 }
 
 .anim-card-destroyed {
-  animation: bastionCardDestroyed 500ms ease-in-out forwards;
+  animation: bastionCardDestroyed var(--anim-duration, 480ms) ease-in-out forwards;
   box-shadow: 0 0 34px rgba(239, 68, 68, 1) !important;
   z-index: 35;
 }
 
 .anim-buff-pulse {
-  animation: bastionBuffPulse 440ms ease-out forwards;
+  animation: bastionBuffPulse var(--anim-duration, 460ms) ease-out forwards;
   box-shadow: 0 0 28px rgba(74, 222, 128, 0.9) !important;
   z-index: 30;
 }
 
 .anim-float-badge {
-  animation: bastionFloatBadge 520ms ease-out forwards;
+  animation: bastionFloatBadge var(--anim-duration, 500ms) ease-out forwards;
 }
 
 .anim-banner-pop {

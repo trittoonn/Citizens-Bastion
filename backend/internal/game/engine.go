@@ -260,7 +260,17 @@ func (g *GameState) ApplyMulligan(playerID string, cardInstanceIDs []string) err
 	p.MulliganDone = true
 
 	if g.Players[0].MulliganDone && g.Players[1].MulliganDone {
-		g.beginTurn(0)
+		firstIdx := 0
+		switch g.Rules.StartingPlayer {
+		case StartingPlayerGuest:
+			firstIdx = 1
+		case StartingPlayerRandom:
+			r := rand.New(rand.NewSource(time.Now().UnixNano() + int64(g.nextInstanceSeq)))
+			firstIdx = r.Intn(2)
+		default:
+			firstIdx = 0
+		}
+		g.beginTurn(firstIdx)
 	}
 
 	g.bumpVersion()

@@ -150,7 +150,7 @@ export const CardView: React.FC<CardViewProps> = ({
         onClick={onClick}
         onMouseEnter={onMouseEnter}
         onMouseLeave={onMouseLeave}
-        className={`group relative w-[110px] h-[68px] rounded-md p-[2.5px] border ${outerBevel} transition-all duration-150 select-none ${
+        className={`group relative w-[106px] h-[56px] my-1 mx-1 rounded-md p-[2.5px] border ${outerBevel} transition-all duration-150 select-none ${
           onClick ? 'cursor-pointer hover:scale-105 hover:z-30' : ''
         } ${statusGlow} ${animClass}`}
       >
@@ -226,9 +226,9 @@ export const CardView: React.FC<CardViewProps> = ({
                 ? `Vitalidad actual: ${currentV}/${baseV} | Daño de ataque: ${attackV}`
                 : `Vitalidad (Salud y Daño): ${currentV}V (Base: ${baseV}V)`
             }
-            className="absolute -top-2 -left-2 z-20 flex items-center"
+            className="absolute -top-1.5 -left-1.5 z-20 flex items-center"
           >
-            <div className="relative w-7 h-8 flex items-center justify-center drop-shadow-[0_3px_6px_rgba(0,0,0,0.95)]">
+            <div className="relative w-6 h-7 flex items-center justify-center drop-shadow-[0_3px_6px_rgba(0,0,0,0.95)]">
               <svg viewBox="0 0 36 42" className="absolute inset-0 w-full h-full">
                 <path
                   d="M18 2 L33 8 L30 26 C28 33 18 39 18 39 C18 39 8 33 6 26 L3 8 Z"
@@ -270,7 +270,7 @@ export const CardView: React.FC<CardViewProps> = ({
         )}
 
         {/* TOP-RIGHT: Elegant Floating Status Badge (Zzz / Ready Sword / Movable) */}
-        <div className="absolute -top-1.5 -right-1.5 z-20 flex items-center gap-0.5">
+        <div className="absolute -top-1.5 -right-1 z-20 flex items-center gap-0.5">
           {instance?.playedThisTurn ? (
             <span
               title="Agotado (jugado este turno, no puede moverse)"
@@ -313,14 +313,14 @@ export const CardView: React.FC<CardViewProps> = ({
   // ===========================================================================
   const dimensions =
     effectiveSize === 'hand'
-      ? 'w-[122px] h-[132px]'
+      ? 'w-[120px] h-[124px]'
       : effectiveSize === 'lg'
       ? 'w-[254px] h-[364px]'
       : 'w-[206px] h-[298px]';
 
   const artHeight =
     effectiveSize === 'hand'
-      ? 'h-[42px]'
+      ? 'h-[38px]'
       : effectiveSize === 'lg'
       ? 'h-[150px]'
       : 'h-[116px]';

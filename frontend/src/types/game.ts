@@ -85,6 +85,10 @@ export interface DeckPreset {
 
 export type VitalityMode = 'dynamic' | 'base_attack';
 
+export type StartingPlayerMode = 'player' | 'ai' | 'random';
+
+export type AnimationSpeed = 'slow' | 'medium' | 'fast';
+
 export type AIDifficulty = '' | 'easy' | 'medium' | 'hard';
 
 export interface DeckConstraints {
@@ -97,6 +101,7 @@ export interface DeckConstraints {
 export interface GameRulesConfig {
   vitalityMode: VitalityMode;
   retaliationDamage: boolean;
+  startingPlayer?: StartingPlayerMode;
   pointsToWin: number;
   initialHandSize: number;
   drawPerTurn: number;

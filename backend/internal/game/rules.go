@@ -15,6 +15,18 @@ const (
 	VitalityModeBaseAttack VitalityMode = "base_attack"
 )
 
+// StartingPlayerMode controls which player takes Turn 1 after Mulligan.
+type StartingPlayerMode string
+
+const (
+	// StartingPlayerHost means Player 1 (lobby creator / human player vs AI) starts first.
+	StartingPlayerHost StartingPlayerMode = "player"
+	// StartingPlayerGuest means Player 2 (second player / AI opponent) starts first.
+	StartingPlayerGuest StartingPlayerMode = "ai"
+	// StartingPlayerRandom chooses randomly between Player 1 and Player 2.
+	StartingPlayerRandom StartingPlayerMode = "random"
+)
+
 // DeckConstraints defines optional deck building rules.
 // By default Enforced is false so players can experiment freely.
 type DeckConstraints struct {
@@ -26,9 +38,10 @@ type DeckConstraints struct {
 
 // GameRulesConfig holds configurable match parameters.
 type GameRulesConfig struct {
-	VitalityMode      VitalityMode    `json:"vitalityMode"`
-	RetaliationDamage bool            `json:"retaliationDamage"`
-	PointsToWin       int             `json:"pointsToWin"`
+	VitalityMode      VitalityMode       `json:"vitalityMode"`
+	RetaliationDamage bool               `json:"retaliationDamage"`
+	StartingPlayer    StartingPlayerMode `json:"startingPlayer"`
+	PointsToWin       int                `json:"pointsToWin"`
 	InitialHandSize   int             `json:"initialHandSize"`
 	DrawPerTurn       int             `json:"drawPerTurn"`
 	FirstTurnDraw     int             `json:"firstTurnDraw"`
@@ -43,6 +56,7 @@ func DefaultRulesConfig() GameRulesConfig {
 	return GameRulesConfig{
 		VitalityMode:      VitalityModeDynamic,
 		RetaliationDamage: false,
+		StartingPlayer:    StartingPlayerHost,
 		PointsToWin:       10,
 		InitialHandSize:   4,
 		DrawPerTurn:       2,
@@ -64,6 +78,11 @@ func (c GameRulesConfig) Normalize() GameRulesConfig {
 	def := DefaultRulesConfig()
 	if c.VitalityMode != VitalityModeDynamic && c.VitalityMode != VitalityModeBaseAttack {
 		c.VitalityMode = def.VitalityMode
+	}
+	if c.StartingPlayer != StartingPlayerHost &&
+		c.StartingPlayer != StartingPlayerGuest &&
+		c.StartingPlayer != StartingPlayerRandom {
+		c.StartingPlayer = def.StartingPlayer
 	}
 	if c.PointsToWin <= 0 {
 		c.PointsToWin = def.PointsToWin
