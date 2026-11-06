@@ -15,6 +15,7 @@ import { generateCardDescription } from '../services/storage';
 import { CardView } from './CardView';
 
 interface CardCreatorModalProps {
+  initialCard?: CardDefinition | null;
   onClose: () => void;
   onSave: (card: CardDefinition) => void;
 }
@@ -28,9 +29,34 @@ const COLOR_OPTIONS = [
   '#7c3aed',
   '#dc2626',
   '#0d9488',
+  '#65a30d',
+  '#334155',
+  '#475569',
+  '#7c2d12',
 ];
 
 const ICON_OPTIONS = [
+  'caballero_galardonado',
+  'reclutador_de_guerra',
+  'reclutador',
+  'granjero',
+  'mago_de_las_tormentas',
+  'mensajero',
+  'asesino',
+  'protector_de_los_debiles',
+  'germinador',
+  'explorador_de_basura',
+  'nadador_de_basura',
+  'demoledor_de_basura',
+  'trillizos',
+  'rayo_vengativo',
+  'el_regreso_del_sobreviviente',
+  'mision_de_investigacion',
+  'dado_de_baja',
+  'pacto_de_sacrificio',
+  'una_puerta_se_abre',
+  'mercenarios_de_emergencia',
+  'fabrica_de_robots',
   'sword',
   'users',
   'flag',
@@ -42,17 +68,6 @@ const ICON_OPTIONS = [
   'undo',
   'skull',
   'shield',
-  'granjero',
-  'asesino',
-  'protector_de_los_debiles',
-  'germinador',
-  'explorador_de_basura',
-  'nadador_de_basura',
-  'demoledor_de_basura',
-  'trillizos',
-  'una_puerta_se_abre',
-  'mercenarios_de_emergencia',
-  'fabrica_de_robots',
 ];
 
 function createDefaultStep(op: EffectOpType): EffectStep {
@@ -141,18 +156,46 @@ function createDefaultStep(op: EffectOpType): EffectStep {
   }
 }
 
-export const CardCreatorModal: React.FC<CardCreatorModalProps> = ({ onClose, onSave }) => {
-  const [name, setName] = useState('');
-  const [type, setType] = useState<CardType>('citizen');
-  const [vitality, setVitality] = useState(5);
-  const [isSpy, setIsSpy] = useState(false);
-  const [hasShield, setHasShield] = useState(false);
-  const [playFromDiscard, setPlayFromDiscard] = useState(false);
-  const [artColor, setArtColor] = useState(COLOR_OPTIONS[0]);
-  const [artIcon, setArtIcon] = useState(ICON_OPTIONS[0]);
-  const [artImageUrl, setArtImageUrl] = useState('');
-  const [customDescription, setCustomDescription] = useState('');
-  const [abilities, setAbilities] = useState<Ability[]>([]);
+export const CardCreatorModal: React.FC<CardCreatorModalProps> = ({
+  initialCard,
+  onClose,
+  onSave,
+}) => {
+  const isEditing = Boolean(initialCard);
+  const [name, setName] = useState(() => initialCard?.name || '');
+  const [type, setType] = useState<CardType>(() => initialCard?.type || 'citizen');
+  const [vitality, setVitality] = useState(() =>
+    initialCard && initialCard.vitality > 0 ? initialCard.vitality : 5
+  );
+  const [isSpy, setIsSpy] = useState(() => Boolean(initialCard?.isSpy));
+  const [hasShield, setHasShield] = useState(() => Boolean(initialCard?.hasShield));
+  const [playFromDiscard, setPlayFromDiscard] = useState(() =>
+    Boolean(initialCard?.playFromDiscard)
+  );
+  const [artColor, setArtColor] = useState(
+    () => initialCard?.artColor || COLOR_OPTIONS[0]
+  );
+  const [artIcon, setArtIcon] = useState(() => {
+    if (initialCard && ICON_OPTIONS.includes(initialCard.id)) {
+      return initialCard.id;
+    }
+    return initialCard?.artIcon || ICON_OPTIONS[0];
+  });
+  const [artImageUrl, setArtImageUrl] = useState(() => initialCard?.artImage || '');
+  const [abilities, setAbilities] = useState<Ability[]>(() =>
+    initialCard?.abilities ? JSON.parse(JSON.stringify(initialCard.abilities)) : []
+  );
+  const [customDescription, setCustomDescription] = useState(() => {
+    if (!initialCard) return '';
+    const auto = generateCardDescription(initialCard.abilities || [], {
+      isSpy: Boolean(initialCard.isSpy),
+      hasShield: Boolean(initialCard.hasShield),
+      playFromDiscard: Boolean(initialCard.playFromDiscard),
+    });
+    return initialCard.description && initialCard.description !== auto
+      ? initialCard.description
+      : '';
+  });
 
   const handleTypeChange = (nextType: CardType) => {
     setType(nextType);
@@ -236,7 +279,7 @@ export const CardCreatorModal: React.FC<CardCreatorModalProps> = ({ onClose, onS
   const finalDescription = customDescription.trim() || autoDescription;
 
   const previewCard: CardDefinition = {
-    id: 'preview_card',
+    id: initialCard?.id || 'preview_card',
     name: name.trim() || 'Nueva Carta',
     type,
     vitality: type === 'citizen' || type === 'tool' ? Math.max(1, vitality) : 0,
@@ -251,21 +294,32 @@ export const CardCreatorModal: React.FC<CardCreatorModalProps> = ({ onClose, onS
     artImage: artImageUrl.trim() || undefined,
   };
 
+  const buildNewCardSlug = () =>
+    'custom_' +
+    name
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_') +
+    '_' +
+    Math.random().toString(36).substring(2, 6);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
-    const slug =
-      'custom_' +
-      name
-        .trim()
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '_') +
-      '_' +
-      Math.random().toString(36).substring(2, 6);
+    const idToUse = initialCard ? initialCard.id : buildNewCardSlug();
 
     onSave({
       ...previewCard,
-      id: slug,
+      id: idToUse,
+      name: name.trim(),
+    });
+  };
+
+  const handleSaveAsNewCopy = () => {
+    if (!name.trim()) return;
+    onSave({
+      ...previewCard,
+      id: buildNewCardSlug(),
       name: name.trim(),
     });
   };
@@ -278,10 +332,14 @@ export const CardCreatorModal: React.FC<CardCreatorModalProps> = ({ onClose, onS
             <Sparkles className="w-6 h-6 text-[#c59b27]" />
             <div>
               <h2 className="font-display text-xl font-bold text-[#f3ead8]">
-                Forja de Cartas del Bastión
+                {isEditing
+                  ? `Editar Carta: ${initialCard?.name}`
+                  : 'Forja de Cartas del Bastión'}
               </h2>
               <p className="font-serif text-sm text-[#a89b8c]">
-                Diseñá nuevos Ciudadanos o Eventos combinando disparadores y efectos. Se guardan en tu navegador y funcionan automáticamente en partidas online.
+                {isEditing
+                  ? 'Modificá estadísticas, palabras clave, disparadores o efectos de esta carta. Los cambios se reflejarán en tu colección y mazos.'
+                  : 'Diseñá nuevos Ciudadanos, Herramientas o Eventos combinando disparadores y efectos. Se guardan en tu navegador y funcionan automáticamente en partidas.'}
               </p>
             </div>
           </div>
@@ -955,9 +1013,20 @@ export const CardCreatorModal: React.FC<CardCreatorModalProps> = ({ onClose, onS
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">
-                Texto de Reglas (Opcional — se genera automáticamente si lo dejás vacío)
-              </label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-semibold text-slate-300">
+                  Texto de Reglas (Opcional — se genera automáticamente si lo dejás vacío)
+                </label>
+                {customDescription.trim() !== '' && (
+                  <button
+                    type="button"
+                    onClick={() => setCustomDescription('')}
+                    className="text-[11px] text-amber-400 hover:underline"
+                  >
+                    ↻ Usar texto autogenerado
+                  </button>
+                )}
+              </div>
               <input
                 type="text"
                 placeholder={autoDescription}
@@ -983,8 +1052,18 @@ export const CardCreatorModal: React.FC<CardCreatorModalProps> = ({ onClose, onS
                 disabled={!name.trim()}
                 className="btn-war-gold w-full py-2.5 px-4 rounded text-xs"
               >
-                Forjar y Guardar en Armería
+                {isEditing ? 'Guardar Cambios' : 'Forjar y Guardar en Armería'}
               </button>
+              {isEditing && (
+                <button
+                  type="button"
+                  disabled={!name.trim()}
+                  onClick={handleSaveAsNewCopy}
+                  className="btn-war-iron w-full py-2 px-4 rounded text-xs border-[#c59b27]/60 text-[#f3d46b]"
+                >
+                  Guardar como Copia Nueva
+                </button>
+              )}
               <button
                 type="button"
                 onClick={onClose}

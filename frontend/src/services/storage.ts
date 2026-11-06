@@ -86,29 +86,87 @@ export function getAllCards(): CardDefinition[] {
 }
 
 export function saveCustomCard(card: CardDefinition): CardDefinition[] {
+  const savedCard: CardDefinition = { ...card, isCustom: true };
   const custom = getCustomCards().filter((c) => c.id !== card.id);
-  const updated = [...custom, { ...card, isCustom: true }];
+  const updated = [...custom, savedCard];
   localStorage.setItem(KEYS.CUSTOM_CARDS, JSON.stringify(updated));
+
+  try {
+    const rawOverride = localStorage.getItem(KEYS.COLLECTION_OVERRIDE);
+    if (rawOverride !== null) {
+      const parsed: CardDefinition[] = JSON.parse(rawOverride);
+      if (Array.isArray(parsed)) {
+        const idx = parsed.findIndex((c) => c.id === card.id);
+        const nextOverride =
+          idx >= 0
+            ? parsed.map((c, i) => (i === idx ? savedCard : c))
+            : [...parsed, savedCard];
+        localStorage.setItem(KEYS.COLLECTION_OVERRIDE, JSON.stringify(nextOverride));
+      }
+    }
+  } catch {
+    // Ignore
+  }
+
+  // Also synchronize any copies of this card inside existing decks so edits take effect immediately
+  try {
+    const currentDecks = getAllDecks();
+    let decksChanged = false;
+    const syncedDecks = currentDecks.map((d) => {
+      if (!d.cards.some((c) => c.id === savedCard.id)) {
+        return d;
+      }
+      decksChanged = true;
+      return {
+        ...d,
+        cards: d.cards.map((c) => (c.id === savedCard.id ? savedCard : c)),
+      };
+    });
+    if (decksChanged) {
+      localStorage.setItem(KEYS.DECKS, JSON.stringify(syncedDecks));
+    }
+  } catch {
+    // Ignore
+  }
+
   return getAllCards();
 }
 
 export function deleteCustomCard(cardId: string): CardDefinition[] {
   const custom = getCustomCards().filter((c) => c.id !== cardId);
   localStorage.setItem(KEYS.CUSTOM_CARDS, JSON.stringify(custom));
+  const canonicalDefault = DEFAULT_CARDS.find((c) => c.id === cardId);
+
   try {
     const rawOverride = localStorage.getItem(KEYS.COLLECTION_OVERRIDE);
     if (rawOverride !== null) {
       const parsed: CardDefinition[] = JSON.parse(rawOverride);
       if (Array.isArray(parsed)) {
-        localStorage.setItem(
-          KEYS.COLLECTION_OVERRIDE,
-          JSON.stringify(parsed.filter((c) => c.id !== cardId))
-        );
+        const nextOverride = canonicalDefault
+          ? parsed.map((c) => (c.id === cardId ? canonicalDefault : c))
+          : parsed.filter((c) => c.id !== cardId);
+        localStorage.setItem(KEYS.COLLECTION_OVERRIDE, JSON.stringify(nextOverride));
       }
     }
   } catch {
     // Ignore
   }
+
+  // If this was an edited default card, restore the canonical default inside existing decks;
+  // otherwise remove the deleted custom card from existing decks.
+  try {
+    const currentDecks = getAllDecks();
+    const syncedDecks = currentDecks.map((d) => ({
+      ...d,
+      cards: canonicalDefault
+        ? d.cards.map((c) => (c.id === cardId ? canonicalDefault : c))
+        : d.cards.filter((c) => c.id !== cardId),
+    }));
+    localStorage.setItem(KEYS.DECKS, JSON.stringify(syncedDecks));
+  } catch {
+    // Ignore
+  }
+
   return getAllCards();
 }
 

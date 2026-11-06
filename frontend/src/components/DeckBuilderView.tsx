@@ -7,6 +7,7 @@ import {
   Download,
   FileCode2,
   Layers,
+  Pencil,
   Plus,
   Printer,
   RotateCcw,
@@ -52,6 +53,7 @@ export const DeckBuilderView: React.FC = () => {
   );
   const [showConstraintsPanel, setShowConstraintsPanel] = useState(false);
   const [showCardModal, setShowCardModal] = useState(false);
+  const [editingCard, setEditingCard] = useState<CardDefinition | null>(null);
   const [showPrintModal, setShowPrintModal] = useState(false);
   const [filterType, setFilterType] = useState<
     'all' | 'citizen' | 'tool' | 'event' | 'custom'
@@ -181,12 +183,15 @@ export const DeckBuilderView: React.FC = () => {
   const handleSaveNewCard = (newCard: CardDefinition) => {
     const nextCards = saveCustomCard(newCard);
     setCards(nextCards);
+    setDecks(getAllDecks());
     setShowCardModal(false);
+    setEditingCard(null);
   };
 
   const handleDeleteCustomCard = (cardId: string) => {
     const nextCards = deleteCustomCard(cardId);
     setCards(nextCards);
+    setDecks(getAllDecks());
   };
 
   const updateConstraints = (next: DeckConstraints) => {
@@ -307,7 +312,10 @@ export const DeckBuilderView: React.FC = () => {
             </button>
 
             <button
-              onClick={() => setShowCardModal(true)}
+              onClick={() => {
+                setEditingCard(null);
+                setShowCardModal(true);
+              }}
               className="btn-war-gold px-4 py-2.5 rounded text-xs flex items-center gap-1.5"
             >
               <Sparkles className="w-4 h-4" />
@@ -366,6 +374,19 @@ export const DeckBuilderView: React.FC = () => {
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
+                          setEditingCard(card);
+                          setShowCardModal(true);
+                        }}
+                        title="Editar esta carta (estadísticas, habilidades o ilustración)"
+                        className="px-1.5 py-1 rounded-sm bg-[#1f1a15] hover:bg-[#2e261d] border border-[#c59b27]/70 text-[9px] font-display font-bold text-[#f3d46b] flex items-center gap-0.5"
+                      >
+                        <Pencil className="w-3 h-3 text-[#f3d46b]" />
+                        <span>Editar</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
                           const code = exportCardToCode(card);
                           copyToClipboard(code, `card_${card.id}`);
                         }}
@@ -391,7 +412,7 @@ export const DeckBuilderView: React.FC = () => {
                             e.stopPropagation();
                             handleDeleteCustomCard(card.id);
                           }}
-                          title="Eliminar carta personalizada"
+                          title="Eliminar carta personalizada o restaurar versión original"
                           className="p-1 rounded-sm bg-[#3b1614] hover:bg-[#571d1a] border border-[#8c2222] text-[#fca5a5]"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -693,7 +714,11 @@ export const DeckBuilderView: React.FC = () => {
 
       {showCardModal && (
         <CardCreatorModal
-          onClose={() => setShowCardModal(false)}
+          initialCard={editingCard}
+          onClose={() => {
+            setShowCardModal(false);
+            setEditingCard(null);
+          }}
           onSave={handleSaveNewCard}
         />
       )}

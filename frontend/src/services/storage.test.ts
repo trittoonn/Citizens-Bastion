@@ -60,6 +60,29 @@ describe('localStorage Card & Deck Studio Service', () => {
 
     const afterDelete = deleteCustomCard('custom_arquero');
     expect(afterDelete.length).toBe(baseCount);
+
+    // Editing an existing canonical default card updates it in place and syncs decks
+    const origCab = afterDelete.find((c) => c.id === 'caballero_galardonado')!;
+    const editedCab: CardDefinition = {
+      ...origCab,
+      vitality: 14,
+      hasShield: true,
+      description: 'Escudo. Veterano del Bastión.',
+    };
+    const afterEditDefault = saveCustomCard(editedCab);
+    expect(afterEditDefault.length).toBe(baseCount);
+    const updatedCab = afterEditDefault.find((c) => c.id === 'caballero_galardonado');
+    expect(updatedCab?.vitality).toBe(14);
+    expect(updatedCab?.hasShield).toBe(true);
+
+    const deckCab = getAllDecks()[0].cards.find((c) => c.id === 'caballero_galardonado');
+    expect(deckCab?.vitality).toBe(14);
+
+    // Deleting/restoring an edited default card restores its canonical 10V version
+    const afterRestoreDefault = deleteCustomCard('caballero_galardonado');
+    expect(
+      afterRestoreDefault.find((c) => c.id === 'caballero_galardonado')?.vitality
+    ).toBe(10);
   });
 
   it('supports optional deck constraints (warnings when unenforced, errors when enforced)', () => {
