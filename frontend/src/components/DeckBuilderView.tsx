@@ -20,7 +20,8 @@ import {
   saveDeckConstraints,
   validateDeckLocal,
 } from '../services/storage';
-import { CardView } from './CardView';
+import { CardView, renderCardIcon } from './CardView';
+import { CardArt } from './CardArt';
 import { CardCreatorModal } from './CardCreatorModal';
 
 export const DeckBuilderView: React.FC = () => {
@@ -105,8 +106,8 @@ export const DeckBuilderView: React.FC = () => {
     const newId = 'deck_' + Math.random().toString(36).substring(2, 8);
     const newDeck: DeckPreset = {
       id: newId,
-      name: `Nuevo Mazo #${decks.length + 1}`,
-      description: 'Mazo personalizado guardado en localStorage.',
+      name: `Códice #${decks.length + 1}`,
+      description: 'Mazo personalizado forjado en el Bastión.',
       cards: [],
     };
     const next = saveDeck(newDeck);
@@ -145,47 +146,43 @@ export const DeckBuilderView: React.FC = () => {
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
-      {/* Left 8 Columns: Card Collection & Creator */}
+      {/* Left 8 Columns: Card Collection & Forge */}
       <div className="lg:col-span-8 space-y-5">
-        <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-900/80 border border-slate-800 rounded-2xl p-4">
+        <div className="bastion-panel rounded-lg p-5 flex flex-wrap items-center justify-between gap-4">
           <div>
-            <h2 className="text-lg font-bold text-white flex items-center gap-2">
-              <Layers className="w-5 h-5 text-amber-400" />
-              Colección de Cartas ({cards.length})
+            <h2 className="font-display text-lg font-bold text-[#f3ead8] flex items-center gap-2">
+              <Layers className="w-5 h-5 text-[#c59b27]" />
+              Armería y Archivo de Cartas ({cards.length})
             </h2>
-            <p className="text-xs text-slate-400">
-              Hacé clic en cualquier carta para agregarla al mazo activo, o creá cartas nuevas.
+            <p className="font-serif text-sm text-[#a89b8c]">
+              Seleccioná cualquier carta para alistarla en tu mazo activo o forjá nuevas cartas en el estudio.
             </p>
           </div>
 
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setShowCardModal(true)}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow-lg shadow-amber-500/20 transition"
-            >
-              <Sparkles className="w-4 h-4" />
-              Crear Nueva Carta
-            </button>
-          </div>
+          <button
+            onClick={() => setShowCardModal(true)}
+            className="btn-war-gold px-4 py-2.5 rounded text-xs flex items-center gap-1.5"
+          >
+            <Sparkles className="w-4 h-4" />
+            Forjar Nueva Carta
+          </button>
         </div>
 
         {/* Filter Tabs */}
         <div className="flex items-center gap-2 flex-wrap">
           {(
             [
-              { id: 'all', label: 'Todas' },
+              { id: 'all', label: 'Todas las Cartas' },
               { id: 'citizen', label: 'Ciudadanos' },
               { id: 'event', label: 'Eventos' },
-              { id: 'custom', label: 'Personalizadas (Custom)' },
+              { id: 'custom', label: 'Forjadas (Custom)' },
             ] as const
           ).map((tab) => (
             <button
               key={tab.id}
               onClick={() => setFilterType(tab.id)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-                filterType === tab.id
-                  ? 'bg-amber-500 text-slate-950'
-                  : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800'
+              className={`px-3.5 py-1.5 rounded text-xs transition ${
+                filterType === tab.id ? 'btn-war-gold' : 'btn-war-iron'
               }`}
             >
               {tab.label}
@@ -194,26 +191,27 @@ export const DeckBuilderView: React.FC = () => {
         </div>
 
         {/* Cards Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-5">
           {filteredCards.map((card) => {
             const countInDeck = deckCardCounts.get(card.id) || 0;
             return (
               <div key={card.id} className="flex justify-center">
                 <CardView
                   card={card}
+                  size="md"
                   badgeCount={countInDeck}
                   onClick={() => handleAddCardToDeck(card)}
                   footerAction={
-                    <div className="flex items-center justify-between gap-1 pt-1">
+                    <div className="flex items-center justify-between gap-1.5">
                       <button
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
                           handleAddCardToDeck(card);
                         }}
-                        className="flex-1 py-1 px-2 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-[11px] font-semibold"
+                        className="btn-war-iron flex-1 py-1 px-2 rounded-sm text-[10px] text-[#e3c158]"
                       >
-                        + Al Mazo
+                        + Alistar al Mazo
                       </button>
                       {card.isCustom && (
                         <button
@@ -223,7 +221,7 @@ export const DeckBuilderView: React.FC = () => {
                             handleDeleteCustomCard(card.id);
                           }}
                           title="Eliminar carta personalizada"
-                          className="p-1 rounded bg-rose-500/10 hover:bg-rose-500/20 text-rose-400"
+                          className="p-1 rounded-sm bg-[#3b1614] hover:bg-[#571d1a] border border-[#8c2222] text-[#fca5a5]"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -237,27 +235,27 @@ export const DeckBuilderView: React.FC = () => {
         </div>
       </div>
 
-      {/* Right 4 Columns: Active Deck & Optional Constraints */}
+      {/* Right 4 Columns: Active Deck & Hearthstone/MTG Arena Card Bars */}
       <div className="lg:col-span-4 space-y-4">
-        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 space-y-4 sticky top-4">
-          <div className="flex items-center justify-between gap-2">
-            <h3 className="text-base font-bold text-white">Constructor de Mazos</h3>
+        <div className="bastion-panel rounded-lg p-4 space-y-4 sticky top-20">
+          <div className="flex items-center justify-between gap-2 border-b border-[#574c3f] pb-3">
+            <h3 className="font-display text-base font-bold text-[#f3ead8]">
+              Códice de Mazo
+            </h3>
             <div className="flex items-center gap-1.5">
               <button
                 onClick={() => setShowConstraintsPanel((v) => !v)}
                 title="Configurar restricciones opcionales de mazo"
-                className={`p-1.5 rounded-lg border text-xs flex items-center gap-1 ${
-                  constraints.enforced
-                    ? 'bg-amber-500/20 border-amber-500/40 text-amber-300'
-                    : 'bg-slate-800 border-slate-700 text-slate-300'
+                className={`btn-war-iron px-2.5 py-1 rounded text-[11px] flex items-center gap-1 ${
+                  constraints.enforced ? 'border-[#c59b27] text-[#e3c158]' : ''
                 }`}
               >
-                <Settings2 className="w-4 h-4" />
-                Reglas
+                <Settings2 className="w-3.5 h-3.5" />
+                Límites
               </button>
               <button
                 onClick={handleCreateNewDeck}
-                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 text-xs font-semibold"
+                className="btn-war-gold px-2.5 py-1 rounded text-[11px] flex items-center gap-1"
               >
                 <Plus className="w-3.5 h-3.5" /> Nuevo
               </button>
@@ -266,11 +264,10 @@ export const DeckBuilderView: React.FC = () => {
 
           {/* Deck Selector */}
           <div className="space-y-2">
-            <label className="block text-xs text-slate-400">Mazo seleccionado</label>
             <select
               value={activeDeck?.id || ''}
               onChange={(e) => setSelectedDeckId(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-sm text-white font-semibold"
+              className="w-full px-3 py-2 rounded bg-[#14110e] border border-[#574c3f] font-display text-xs font-bold text-[#e3c158] focus:border-[#c59b27] focus:outline-none"
             >
               {decks.map((d) => (
                 <option key={d.id} value={d.id}>
@@ -285,14 +282,14 @@ export const DeckBuilderView: React.FC = () => {
                   type="text"
                   value={activeDeck.name}
                   onChange={(e) => handleRenameDeck(e.target.value)}
-                  className="flex-1 px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-200"
+                  className="flex-1 px-2.5 py-1.5 rounded bg-[#14110e] border border-[#463c32] font-display text-xs text-[#e7dfd3] focus:border-[#c59b27] focus:outline-none"
                   placeholder="Nombre del mazo"
                 />
                 {decks.length > 1 && (
                   <button
                     onClick={handleDeleteCurrentDeck}
                     title="Eliminar este mazo"
-                    className="p-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400"
+                    className="p-1.5 rounded bg-[#3b1614] hover:bg-[#571d1a] border border-[#8c2222] text-[#fca5a5]"
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
@@ -303,10 +300,10 @@ export const DeckBuilderView: React.FC = () => {
 
           {/* Optional Constraints Drawer */}
           {showConstraintsPanel && (
-            <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-2.5 text-xs">
+            <div className="p-3 rounded bg-[#14110e] border border-[#574c3f] space-y-2.5 text-xs">
               <div className="flex items-center justify-between">
-                <span className="font-semibold text-slate-200">
-                  Forzar restricciones de mazo
+                <span className="font-display font-bold text-[#e3c158] text-[11px]">
+                  Exigir límites de construcción
                 </span>
                 <input
                   type="checkbox"
@@ -314,15 +311,12 @@ export const DeckBuilderView: React.FC = () => {
                   onChange={(e) =>
                     updateConstraints({ ...constraints, enforced: e.target.checked })
                   }
-                  className="accent-amber-500 w-4 h-4"
+                  className="accent-[#c59b27] w-4 h-4"
                 />
               </div>
-              <p className="text-[11px] text-slate-400">
-                Por defecto las restricciones están desactivadas para permitir libre experimentación. Podés activarlas aquí o al crear una sala.
-              </p>
               <div className="grid grid-cols-3 gap-2">
                 <div>
-                  <span className="text-slate-400 block">Mín. Cartas</span>
+                  <span className="text-[#a89b8c] text-[10px] block">Mín. Cartas</span>
                   <input
                     type="number"
                     min={1}
@@ -334,11 +328,11 @@ export const DeckBuilderView: React.FC = () => {
                         minCards: Number(e.target.value),
                       })
                     }
-                    className="w-full px-2 py-1 rounded bg-slate-900 border border-slate-700 text-white"
+                    className="w-full px-2 py-1 rounded bg-[#1f1a16] border border-[#574c3f] text-[#e7dfd3]"
                   />
                 </div>
                 <div>
-                  <span className="text-slate-400 block">Máx. Cartas</span>
+                  <span className="text-[#a89b8c] text-[10px] block">Máx. Cartas</span>
                   <input
                     type="number"
                     min={1}
@@ -350,11 +344,11 @@ export const DeckBuilderView: React.FC = () => {
                         maxCards: Number(e.target.value),
                       })
                     }
-                    className="w-full px-2 py-1 rounded bg-slate-900 border border-slate-700 text-white"
+                    className="w-full px-2 py-1 rounded bg-[#1f1a16] border border-[#574c3f] text-[#e7dfd3]"
                   />
                 </div>
                 <div>
-                  <span className="text-slate-400 block">Máx. Copias</span>
+                  <span className="text-[#a89b8c] text-[10px] block">Máx. Copias</span>
                   <input
                     type="number"
                     min={1}
@@ -366,7 +360,7 @@ export const DeckBuilderView: React.FC = () => {
                         maxCopiesPerCard: Number(e.target.value),
                       })
                     }
-                    className="w-full px-2 py-1 rounded bg-slate-900 border border-slate-700 text-white"
+                    className="w-full px-2 py-1 rounded bg-[#1f1a16] border border-[#574c3f] text-[#e7dfd3]"
                   />
                 </div>
               </div>
@@ -378,7 +372,7 @@ export const DeckBuilderView: React.FC = () => {
             {validation.errors.map((err, i) => (
               <div
                 key={i}
-                className="flex items-center gap-1.5 text-xs text-rose-300 bg-rose-950/60 border border-rose-500/40 px-2.5 py-1.5 rounded-lg"
+                className="flex items-center gap-1.5 text-xs text-[#fecaca] bg-[#3b1614] border border-[#8c2222] px-2.5 py-1.5 rounded"
               >
                 <AlertTriangle className="w-4 h-4 shrink-0" />
                 <span>{err}</span>
@@ -387,66 +381,105 @@ export const DeckBuilderView: React.FC = () => {
             {validation.warnings.map((w, i) => (
               <div
                 key={i}
-                className="flex items-center gap-1.5 text-[11px] text-amber-300/90 bg-amber-950/40 border border-amber-500/30 px-2.5 py-1 rounded-lg"
+                className="flex items-center gap-1.5 text-[11px] text-[#e3c158] bg-[#261e12] border border-[#8a6d1b]/60 px-2.5 py-1 rounded"
               >
                 <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                <span>{w} (No bloqueante)</span>
+                <span>{w} (Opcional)</span>
               </div>
             ))}
             {validation.valid && validation.warnings.length === 0 && (
-              <div className="flex items-center gap-1.5 text-xs text-emerald-300 bg-emerald-950/40 border border-emerald-500/30 px-2.5 py-1.5 rounded-lg">
+              <div className="flex items-center gap-1.5 text-xs text-[#bbf7d0] bg-[#14291a] border border-[#2e6f40] px-2.5 py-1.5 rounded font-display">
                 <CheckCircle2 className="w-4 h-4 shrink-0" />
-                <span>Mazo listo ({activeDeck?.cards.length || 0} cartas).</span>
+                <span>Mazo Completo ({activeDeck?.cards.length || 0} cartas)</span>
               </div>
             )}
           </div>
 
-          {/* Card List inside Active Deck */}
-          <div className="space-y-1.5 max-h-[50vh] overflow-y-auto pr-1">
+          {/* HEARTHSTONE / MTG ARENA COMPACT CARD BARS */}
+          <div className="space-y-1.5 max-h-[54vh] overflow-y-auto pr-1">
             {Array.from(deckCardCounts.entries()).map(([cardId, count]) => {
               const sample = activeDeck?.cards.find((c) => c.id === cardId);
               if (!sample) return null;
+              const isCitizen = sample.type === 'citizen';
+
               return (
                 <div
                   key={cardId}
-                  className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-slate-950/90 border border-slate-800 text-xs"
+                  className="group relative flex items-center justify-between rounded overflow-hidden bg-[#16120f] border border-[#574c3f] hover:border-[#c59b27] transition h-11 shadow-md"
                 >
-                  <div className="min-w-0">
-                    <div className="font-semibold text-white truncate flex items-center gap-1.5">
-                      <span>{sample.name}</span>
-                      {sample.type === 'citizen' && (
-                        <span className="text-amber-400 font-bold">({sample.vitality}V)</span>
-                      )}
+                  {/* Left: Mini Cropped Artwork + Faction Color Accent */}
+                  <div className="relative w-20 h-full shrink-0 overflow-hidden">
+                    <div
+                      className="absolute inset-y-0 left-0 w-1 z-20"
+                      style={{
+                        backgroundColor:
+                          sample.artColor || (isCitizen ? '#c59b27' : '#7c3aed'),
+                      }}
+                    />
+                    <CardArt card={sample} className="w-full h-full opacity-85" />
+                    <div className="absolute inset-0 bg-gradient-to-r from-transparent via-[#16120f]/60 to-[#16120f]" />
+                    <div className="absolute left-2.5 top-1/2 -translate-y-1/2 z-10 text-[#f3ead8] drop-shadow">
+                      {renderCardIcon(sample.artIcon, 'w-3.5 h-3.5')}
                     </div>
-                    <span className="text-[10px] text-slate-400 uppercase">
-                      {sample.type === 'citizen' ? 'Ciudadano' : 'Evento'}
-                    </span>
                   </div>
 
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <button
-                      onClick={() => handleRemoveCardFromDeck(cardId)}
-                      className="w-6 h-6 rounded bg-slate-800 hover:bg-rose-500/30 text-slate-200 font-bold"
+                  {/* Center: Card Name in Epic Serif Font */}
+                  <div className="flex-1 min-w-0 px-1.5">
+                    <div
+                      className="font-display font-bold text-xs text-[#f3ead8] truncate"
+                      title={sample.name}
                     >
-                      -
-                    </button>
-                    <span className="w-6 text-center font-bold text-amber-400">
-                      {count}
+                      {sample.name}
+                    </div>
+                    <div className="text-[9px] font-display uppercase tracking-wider text-[#a89b8c]">
+                      {isCitizen ? 'Ciudadano' : 'Evento'}
+                    </div>
+                  </div>
+
+                  {/* Right: Prominent Vitality Shield Badge + Quantity (x2, x3) & +/- Controls */}
+                  <div className="flex items-center gap-1.5 pr-2 shrink-0">
+                    {isCitizen ? (
+                      <span
+                        title={`Vitalidad: ${sample.vitality}V`}
+                        className="px-1.5 py-0.5 rounded-sm bg-gradient-to-b from-[#d8b13a] to-[#8a6d1b] border border-[#fef08a]/60 font-display font-black text-[11px] text-[#14100c] shadow"
+                      >
+                        {sample.vitality}V
+                      </span>
+                    ) : (
+                      <span className="px-1.5 py-0.5 rounded-sm bg-[#2b2438] border border-[#818cf8]/50 font-display font-bold text-[9px] text-[#c7d2fe]">
+                        DEC
+                      </span>
+                    )}
+
+                    {/* Quantity Badge (x2, x3) */}
+                    <span className="px-2 py-0.5 rounded-sm bg-[#26211d] border border-[#c59b27]/60 font-display font-black text-xs text-[#e3c158] min-w-[28px] text-center">
+                      x{count}
                     </span>
-                    <button
-                      onClick={() => handleAddCardToDeck(sample)}
-                      className="w-6 h-6 rounded bg-slate-800 hover:bg-emerald-500/30 text-slate-200 font-bold"
-                    >
-                      +
-                    </button>
+
+                    <div className="flex flex-col gap-0.5">
+                      <button
+                        onClick={() => handleAddCardToDeck(sample)}
+                        title="Agregar copia"
+                        className="w-5 h-4 rounded-sm bg-[#2b2520] hover:bg-[#c59b27] hover:text-[#12100e] text-[#e7dfd3] border border-[#574c3f] font-bold text-[10px] leading-none flex items-center justify-center"
+                      >
+                        +
+                      </button>
+                      <button
+                        onClick={() => handleRemoveCardFromDeck(cardId)}
+                        title="Quitar copia"
+                        className="w-5 h-4 rounded-sm bg-[#2b2520] hover:bg-[#8c2222] text-[#e7dfd3] border border-[#574c3f] font-bold text-[10px] leading-none flex items-center justify-center"
+                      >
+                        -
+                      </button>
+                    </div>
                   </div>
                 </div>
               );
             })}
 
             {deckCardCounts.size === 0 && (
-              <p className="text-center text-xs text-slate-500 py-8">
-                El mazo está vacío. Hacé clic en las cartas de la izquierda para agregarlas.
+              <p className="text-center font-serif text-sm text-[#8c7e70] py-8">
+                El códice está vacío. Seleccioná cartas de la armería para alistarlas.
               </p>
             )}
           </div>

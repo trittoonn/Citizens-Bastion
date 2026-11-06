@@ -225,23 +225,23 @@ export const CardCreatorModal: React.FC<CardCreatorModalProps> = ({ onClose, onS
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 overflow-y-auto">
-      <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-4xl w-full p-6 shadow-2xl my-8">
-        <div className="flex items-center justify-between border-b border-slate-800 pb-4 mb-5">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0d0b09]/85 backdrop-blur-sm p-4 overflow-y-auto">
+      <div className="bastion-panel border-2 border-[#c59b27] rounded-lg max-w-4xl w-full p-6 shadow-2xl my-8">
+        <div className="flex items-center justify-between border-b border-[#574c3f] pb-4 mb-5">
           <div className="flex items-center gap-2.5">
-            <Sparkles className="w-6 h-6 text-amber-400" />
+            <Sparkles className="w-6 h-6 text-[#c59b27]" />
             <div>
-              <h2 className="text-xl font-bold text-white">
-                Estudio de Creación de Cartas
+              <h2 className="font-display text-xl font-bold text-[#f3ead8]">
+                Forja de Cartas del Bastión
               </h2>
-              <p className="text-xs text-slate-400">
-                Diseñá nuevos Ciudadanos o Eventos combinando disparadores y efectos. Se guardan en tu navegador (localStorage) y funcionan automáticamente en partidas online.
+              <p className="font-serif text-sm text-[#a89b8c]">
+                Diseñá nuevos Ciudadanos o Eventos combinando disparadores y efectos. Se guardan en tu navegador y funcionan automáticamente en partidas online.
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
+            className="p-1.5 rounded text-[#a89b8c] hover:text-[#f3ead8] hover:bg-[#26211d]"
           >
             <X className="w-5 h-5" />
           </button>
@@ -678,26 +678,26 @@ export const CardCreatorModal: React.FC<CardCreatorModalProps> = ({ onClose, onS
           </div>
 
           {/* Right Column: Live Card Preview & Submit */}
-          <div className="flex flex-col items-center justify-between bg-slate-950/60 border border-slate-800 rounded-xl p-5">
+          <div className="flex flex-col items-center justify-between bg-[#14110e] border border-[#574c3f] rounded-lg p-5">
             <div className="flex flex-col items-center">
-              <span className="text-xs uppercase tracking-wider font-bold text-slate-400 mb-4">
-                Vista Previa en Vivo
+              <span className="font-display text-xs uppercase tracking-wider font-bold text-[#c59b27] mb-4">
+                Vista Previa de la Carta
               </span>
-              <CardView card={previewCard} />
+              <CardView card={previewCard} size="md" />
             </div>
 
             <div className="w-full space-y-2 mt-6">
               <button
                 type="submit"
                 disabled={!name.trim()}
-                className="w-full py-2.5 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-slate-950 font-bold text-sm shadow-lg shadow-amber-500/20 transition"
+                className="btn-war-gold w-full py-2.5 px-4 rounded text-xs"
               >
-                Guardar Carta en Colección
+                Forjar y Guardar en Armería
               </button>
               <button
                 type="button"
                 onClick={onClose}
-                className="w-full py-2 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition"
+                className="btn-war-iron w-full py-2 px-4 rounded text-xs"
               >
                 Cancelar
               </button>

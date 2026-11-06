@@ -57,7 +57,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
       const list = await fetchLobbies();
       setLobbies(list);
     } catch {
-      // Backend might not be reachable yet; handled gracefully
+      // Backend might not be reachable yet
     }
   };
 
@@ -129,29 +129,29 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-8 space-y-8">
-      {/* Player & Deck Selection Bar */}
-      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 grid grid-cols-1 md:grid-cols-3 gap-4 items-end shadow-xl">
+      {/* Commander & Active Deck War-Table Bar */}
+      <div className="bastion-panel rounded-lg p-5 grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
         <div>
-          <label className="block text-xs font-semibold text-slate-400 mb-1">
-            Tu Nombre de Comandante
+          <label className="block font-display text-xs font-bold text-[#c59b27] mb-1">
+            Título del Comandante
           </label>
           <input
             type="text"
             value={session.playerName}
             onChange={(e) => handlePlayerNameChange(e.target.value)}
             placeholder="Ingresá tu nombre..."
-            className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-sm text-white font-semibold focus:border-amber-500 focus:outline-none"
+            className="w-full px-3.5 py-2.5 rounded bg-[#14110e] border border-[#574c3f] font-display text-sm text-[#f3ead8] font-bold focus:border-[#c59b27] focus:outline-none shadow-inner"
           />
         </div>
 
         <div>
-          <label className="block text-xs font-semibold text-slate-400 mb-1">
-            Mazo Activo para Jugar
+          <label className="block font-display text-xs font-bold text-[#c59b27] mb-1">
+            Códice / Mazo de Batalla
           </label>
           <select
             value={selectedDeck?.id || ''}
             onChange={(e) => setSelectedDeckId(e.target.value)}
-            className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-sm text-amber-300 font-bold focus:border-amber-500 focus:outline-none"
+            className="w-full px-3.5 py-2.5 rounded bg-[#14110e] border border-[#574c3f] font-display text-sm text-[#e3c158] font-bold focus:border-[#c59b27] focus:outline-none shadow-inner"
           >
             {decks.map((d) => (
               <option key={d.id} value={d.id}>
@@ -165,15 +165,15 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
           <button
             type="button"
             onClick={onNavigateDeckBuilder}
-            className="w-full py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-bold text-slate-200 transition"
+            className="btn-war-iron w-full py-2.5 px-4 rounded text-xs"
           >
-            Personalizar Mazos y Crear Cartas →
+            Forjar Cartas y Editar Mazos →
           </button>
         </div>
       </div>
 
       {error && (
-        <div className="p-4 rounded-xl bg-rose-950/80 border border-rose-500/50 text-rose-200 text-sm font-medium">
+        <div className="p-4 rounded bg-[#3b1614] border border-[#8c2222] text-[#fecaca] font-serif text-sm">
           {error}
         </div>
       )}
@@ -183,64 +183,66 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
         <div className="lg:col-span-5">
           <form
             onSubmit={handleCreateLobby}
-            className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 space-y-5 shadow-xl"
+            className="bastion-panel rounded-lg p-6 space-y-5"
           >
-            <div className="flex items-center gap-2.5 border-b border-slate-800 pb-3">
-              <PlusCircle className="w-5 h-5 text-amber-400" />
-              <h2 className="text-lg font-bold text-white">Crear Nueva Partida</h2>
+            <div className="flex items-center gap-2.5 border-b border-[#574c3f] pb-3">
+              <PlusCircle className="w-5 h-5 text-[#c59b27]" />
+              <h2 className="font-display text-lg font-bold text-[#f3ead8]">
+                Convocar Nueva Batalla
+              </h2>
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">
-                Nombre de la Sala / Partida *
+              <label className="block font-display text-xs font-bold text-[#d6c7b8] mb-1">
+                Nombre de la Sala / Campaña *
               </label>
               <input
                 type="text"
                 required
-                placeholder="Ej. Batalla por la Colonia"
+                placeholder="Ej. Asedio al Bastión del Norte"
                 value={gameName}
                 onChange={(e) => setGameName(e.target.value)}
-                className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-sm text-white focus:border-amber-500 focus:outline-none"
+                className="w-full px-3.5 py-2.5 rounded bg-[#14110e] border border-[#574c3f] font-serif text-base text-[#f3ead8] focus:border-[#c59b27] focus:outline-none shadow-inner"
               />
             </div>
 
-            {/* Vitality Mode Selector (Supporting both requested versions!) */}
+            {/* Vitality Mode Selector */}
             <div className="space-y-2">
-              <label className="block text-xs font-semibold text-slate-300">
-                Modo de Vitalidad (V) en Combate
+              <label className="block font-display text-xs font-bold text-[#d6c7b8]">
+                Doctrina de Vitalidad (V) en Combate
               </label>
               <div className="grid grid-cols-1 gap-2">
                 <button
                   type="button"
                   onClick={() => setVitalityMode('dynamic')}
-                  className={`text-left p-3 rounded-xl border transition ${
+                  className={`text-left p-3 rounded border transition ${
                     vitalityMode === 'dynamic'
-                      ? 'bg-amber-500/15 border-amber-500 text-white'
-                      : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+                      ? 'bg-[#2b2216] border-[#c59b27] text-[#f3ead8] shadow-[inset_0_0_16px_rgba(197,155,39,0.2)]'
+                      : 'bg-[#14110e] border-[#463c32] text-[#a89b8c] hover:border-[#6e5d4f]'
                   }`}
                 >
-                  <div className="text-xs font-bold text-amber-300">
-                    1. Vitalidad Dinámica (Por defecto)
+                  <div className="font-display text-xs font-bold text-[#e3c158]">
+                    I. Vitalidad Dinámica (Estándar)
                   </div>
-                  <div className="text-[11px] text-slate-300 mt-0.5">
-                    El valor actual de V representa tanto la salud restante como el daño que hace al atacar (ej. si un 10V recibe 2 de daño, queda en 8V y pega 8).
+                  <div className="font-serif text-xs text-[#d6c7b8] mt-0.5 leading-snug">
+                    La Vitalidad actual representa tanto la resistencia restante como el daño infligido al atacar.
                   </div>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => setVitalityMode('base_attack')}
-                  className={`text-left p-3 rounded-xl border transition ${
+                  className={`text-left p-3 rounded border transition ${
                     vitalityMode === 'base_attack'
-                      ? 'bg-amber-500/15 border-amber-500 text-white'
-                      : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+                      ? 'bg-[#2b2216] border-[#c59b27] text-[#f3ead8] shadow-[inset_0_0_16px_rgba(197,155,39,0.2)]'
+                      : 'bg-[#14110e] border-[#463c32] text-[#a89b8c] hover:border-[#6e5d4f]'
                   }`}
                 >
-                  <div className="text-xs font-bold text-amber-300">
-                    2. Ataque Base Fijo
+                  <div className="font-display text-xs font-bold text-[#e3c158]">
+                    II. Fuerza Base Inalterable
                   </div>
-                  <div className="text-[11px] text-slate-300 mt-0.5">
-                    El daño de ataque se mantiene igual a la Vitalidad Base inicial aunque el Ciudadano haya recibido daño.
+                  <div className="font-serif text-xs text-[#d6c7b8] mt-0.5 leading-snug">
+                    El daño de ataque conserva la Vitalidad Base inicial aunque el Ciudadano sufra heridas.
                   </div>
                 </button>
               </div>
@@ -251,19 +253,19 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
               <button
                 type="button"
                 onClick={() => setShowAdvancedRules((v) => !v)}
-                className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200 font-semibold"
+                className="flex items-center gap-1.5 font-display text-[11px] text-[#c59b27] hover:text-[#e3c158] font-bold"
               >
                 <Sliders className="w-3.5 h-3.5" />
                 {showAdvancedRules
-                  ? 'Ocultar opciones avanzadas de partida'
-                  : 'Mostrar opciones avanzadas (Puntos de Victoria / Restricciones)'}
+                  ? 'Ocultar leyes de campaña'
+                  : 'Leyes de Campaña (Puntos de Desarrollo / Límites)'}
               </button>
 
               {showAdvancedRules && (
-                <div className="mt-3 p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-3 text-xs">
+                <div className="mt-3 p-3.5 rounded bg-[#14110e] border border-[#574c3f] space-y-3 text-xs">
                   <div className="flex items-center justify-between">
-                    <span className="text-slate-300">
-                      Puntos de Desarrollo para ganar:
+                    <span className="font-serif text-sm text-[#d6c7b8]">
+                      Puntos de Desarrollo para la Victoria:
                     </span>
                     <input
                       type="number"
@@ -271,18 +273,18 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                       max={30}
                       value={pointsToWin}
                       onChange={(e) => setPointsToWin(Number(e.target.value))}
-                      className="w-20 px-2.5 py-1 rounded bg-slate-900 border border-slate-700 text-white font-bold text-right"
+                      className="w-20 px-2.5 py-1 rounded bg-[#1f1a16] border border-[#574c3f] font-display text-[#e3c158] font-bold text-right"
                     />
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-slate-300">
-                      Exigir restricciones de mazo al unirse:
+                    <span className="font-serif text-sm text-[#d6c7b8]">
+                      Exigir límites de construcción de mazo:
                     </span>
                     <input
                       type="checkbox"
                       checked={enforceDeckConstraints}
                       onChange={(e) => setEnforceDeckConstraints(e.target.checked)}
-                      className="accent-amber-500 w-4 h-4"
+                      className="accent-[#c59b27] w-4 h-4"
                     />
                   </div>
                 </div>
@@ -292,40 +294,40 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
             <button
               type="submit"
               disabled={loading || !gameName.trim()}
-              className="w-full py-3 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-slate-950 font-extrabold text-sm shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2 transition"
+              className="btn-war-gold w-full py-3 px-4 rounded text-xs flex items-center justify-center gap-2"
             >
               <Swords className="w-4 h-4" />
-              Crear Sala y Esperar Oponente
+              Crear Sala en la Mesa de Guerra
             </button>
           </form>
         </div>
 
         {/* Right 7 Columns: Active Lobbies List */}
         <div className="lg:col-span-7">
-          <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 space-y-4 shadow-xl min-h-[420px]">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+          <div className="bastion-panel rounded-lg p-6 space-y-4 min-h-[420px]">
+            <div className="flex items-center justify-between border-b border-[#574c3f] pb-3">
               <div className="flex items-center gap-2.5">
-                <Users className="w-5 h-5 text-amber-400" />
-                <h2 className="text-lg font-bold text-white">
-                  Salas Disponibles ({lobbies.length})
+                <Users className="w-5 h-5 text-[#c59b27]" />
+                <h2 className="font-display text-lg font-bold text-[#f3ead8]">
+                  Salas de Guerra Activas ({lobbies.length})
                 </h2>
               </div>
               <button
                 onClick={loadLobbies}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-300"
+                className="btn-war-iron flex items-center gap-1.5 px-3 py-1.5 rounded text-xs"
               >
-                <RefreshCw className="w-3.5 h-3.5" /> Actualizar
+                <RefreshCw className="w-3.5 h-3.5 text-[#c59b27]" /> Actualizar
               </button>
             </div>
 
             {lobbies.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 text-center text-slate-500">
-                <Shield className="w-12 h-12 mb-3 opacity-30" />
-                <p className="text-sm font-semibold text-slate-400">
-                  No hay partidas activas en este momento.
+              <div className="flex flex-col items-center justify-center py-16 text-center text-[#8c7e70]">
+                <Shield className="w-12 h-12 mb-3 text-[#574c3f]" />
+                <p className="font-display text-sm font-bold text-[#a89b8c]">
+                  No hay campañas abiertas en este momento.
                 </p>
-                <p className="text-xs mt-1 max-w-sm">
-                  Creá una sala nueva en el panel izquierdo con el nombre de tu partida para empezar a jugar.
+                <p className="font-serif text-sm mt-1 max-w-sm">
+                  Convocá una nueva sala en el panel izquierdo para iniciar el duelo.
                 </p>
               </div>
             ) : (
@@ -338,68 +340,64 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                   return (
                     <div
                       key={lobby.id}
-                      className="flex flex-wrap items-center justify-between gap-4 p-4 rounded-xl bg-slate-950/90 border border-slate-800 hover:border-slate-700 transition"
+                      className="flex flex-wrap items-center justify-between gap-4 p-4 rounded bg-[#16120f] border border-[#574c3f] hover:border-[#c59b27] transition shadow-inner"
                     >
                       <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <h3 className="font-bold text-white text-base">
+                        <div className="flex items-center gap-2.5">
+                          <h3 className="font-display font-bold text-[#f3ead8] text-base">
                             {lobby.gameName}
                           </h3>
                           <span
-                            className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${
+                            className={`font-display text-[10px] px-2 py-0.5 rounded-sm font-bold uppercase border ${
                               lobby.phase === 'WAITING_FOR_PLAYERS'
-                                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                                ? 'bg-[#17291b] text-[#bbf7d0] border-[#2e6f40]'
                                 : lobby.phase === 'GAME_OVER'
-                                ? 'bg-slate-800 text-slate-400'
-                                : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                                ? 'bg-[#1f1a16] text-[#8c7e70] border-[#463c32]'
+                                : 'bg-[#2b2216] text-[#e3c158] border-[#c59b27]/60'
                             }`}
                           >
                             {lobby.phase === 'WAITING_FOR_PLAYERS'
-                              ? 'Esperando Jugador (1/2)'
+                              ? 'Aguardando Rival (1/2)'
                               : lobby.phase === 'GAME_OVER'
-                              ? 'Finalizada'
-                              : 'En Curso (2/2)'}
+                              ? 'Concluida'
+                              : 'En Batalla (2/2)'}
                           </span>
                         </div>
 
-                        <div className="flex items-center gap-3 text-xs text-slate-400 flex-wrap">
+                        <div className="flex items-center gap-3 font-serif text-xs text-[#a89b8c] flex-wrap">
                           <span>
-                            Jugadores:{' '}
-                            <strong className="text-slate-200">
+                            Comandantes:{' '}
+                            <strong className="text-[#e7dfd3]">
                               {lobby.playerNames?.join(' vs ') || '—'}
                             </strong>
                           </span>
                           <span>•</span>
                           <span>
-                            Vitalidad:{' '}
-                            <strong className="text-amber-300">
+                            Doctrina:{' '}
+                            <strong className="text-[#e3c158]">
                               {lobby.rules.vitalityMode === 'base_attack'
-                                ? 'Ataque Base Fijo'
-                                : 'Dinámica'}
+                                ? 'Fuerza Base'
+                                : 'V Dinámica'}
                             </strong>
                           </span>
                           <span>•</span>
-                          <span>Meta: {lobby.rules.pointsToWin} pts</span>
+                          <span>Meta: {lobby.rules.pointsToWin} Pts</span>
                         </div>
                       </div>
 
                       <button
                         disabled={!canJoin || loading}
                         onClick={() => handleJoinLobby(lobby.id)}
-                        className={`flex items-center gap-1.5 px-4 py-2 rounded-xl font-bold text-xs transition ${
-                          isParticipant
-                            ? 'bg-sky-500 hover:bg-sky-400 text-slate-950'
-                            : canJoin
-                            ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-lg shadow-emerald-500/20'
-                            : 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                        className={`px-4 py-2 rounded text-xs flex items-center gap-1.5 ${
+                          canJoin ? 'btn-war-gold' : 'btn-war-iron opacity-40'
                         }`}
                       >
                         <Play className="w-3.5 h-3.5" />
                         {isParticipant
-                          ? 'Reconectar a Partida'
+                          ? 'Retomar Batalla'
                           : canJoin
-                          ? 'Unirse a Partida'
-                          : 'Sala Llena'}
+                          ? 'Entrar en Batalla'
+                          : 'Sala Completa'}
                       </button>
                     </div>
                   );
