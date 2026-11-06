@@ -42,6 +42,17 @@ const ICON_OPTIONS = [
   'undo',
   'skull',
   'shield',
+  'granjero',
+  'asesino',
+  'protector_de_los_debiles',
+  'germinador',
+  'explorador_de_basura',
+  'nadador_de_basura',
+  'demoledor_de_basura',
+  'trillizos',
+  'una_puerta_se_abre',
+  'mercenarios_de_emergencia',
+  'fabrica_de_robots',
 ];
 
 function createDefaultStep(op: EffectOpType): EffectStep {
