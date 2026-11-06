@@ -1,0 +1,103 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    background-color: #12100e;
+    color: #e7dfd3;
+    background-image:
+      radial-gradient(circle at 50% 15%, rgba(66, 52, 38, 0.28) 0%, transparent 65%),
+      radial-gradient(circle at 50% 90%, rgba(38, 33, 29, 0.45) 0%, #12100e 80%);
+  }
+
+  h1, h2, h3, h4, .font-epic {
+    font-family: 'Cinzel', Georgia, serif;
+    letter-spacing: 0.03em;
+  }
+}
+
+@layer components {
+  /* Tactile War-Table Panel (Dark Wood / Leather with Wrought-Iron & Bronze Bevel) */
+  .bastion-panel {
+    background: linear-gradient(180deg, #28221e 0%, #1d1815 100%);
+    border: 1px solid #574c3f;
+    box-shadow:
+      inset 0 1px 0 rgba(231, 223, 211, 0.08),
+      inset 0 0 24px rgba(10, 8, 6, 0.75),
+      0 10px 25px -5px rgba(0, 0, 0, 0.8);
+  }
+
+  /* Recessed Stone / Board Trench */
+  .bastion-trench {
+    box-shadow:
+      inset 0 3px 12px rgba(0, 0, 0, 0.85),
+      inset 0 0 1px rgba(197, 155, 39, 0.2);
+  }
+
+  /* Primary Gwent/Thronebreaker Gold Metallic Action Button */
+  .btn-war-gold {
+    font-family: 'Cinzel', Georgia, serif;
+    font-weight: 800;
+    letter-spacing: 0.05em;
+    background: linear-gradient(180deg, #d8b13a 0%, #b38820 55%, #825e10 100%);
+    color: #14100c;
+    border: 1px solid #6b4c0b;
+    border-top: 1px solid rgba(254, 240, 138, 0.65);
+    box-shadow:
+      0 4px 12px rgba(0, 0, 0, 0.65),
+      inset 0 1px 1px rgba(255, 255, 255, 0.35);
+    transition: all 150ms ease;
+  }
+  .btn-war-gold:hover:not(:disabled) {
+    background: linear-gradient(180deg, #e5c14d 0%, #c59b27 55%, #966e15 100%);
+    box-shadow:
+      0 0 16px rgba(197, 155, 39, 0.45),
+      inset 0 1px 2px rgba(255, 255, 255, 0.45);
+  }
+  .btn-war-gold:active:not(:disabled) {
+    transform: translateY(2px);
+  }
+  .btn-war-gold:disabled {
+    opacity: 0.45;
+    filter: grayscale(0.5);
+    cursor: not-allowed;
+  }
+
+  /* Secondary Forged Iron / Bronze Button */
+  .btn-war-iron {
+    font-family: 'Cinzel', Georgia, serif;
+    font-weight: 700;
+    background: linear-gradient(180deg, #352e28 0%, #241f1b 100%);
+    color: #e7dfd3;
+    border: 1px solid #574c3f;
+    border-top: 1px solid rgba(231, 223, 211, 0.22);
+    box-shadow: 0 3px 8px rgba(0, 0, 0, 0.6);
+    transition: all 150ms ease;
+  }
+  .btn-war-iron:hover:not(:disabled) {
+    border-color: #c59b27;
+    color: #f5e6c8;
+    background: linear-gradient(180deg, #403730 0%, #2b2520 100%);
+  }
+  .btn-war-iron:active:not(:disabled) {
+    transform: translateY(2px);
+  }
+}
+
+/* Custom subtle scrollbars for dark parchment logs */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #14110f;
+}
+::-webkit-scrollbar-thumb {
+  background: #463c32;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #c59b27;
+}
