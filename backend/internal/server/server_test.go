@@ -284,5 +284,9 @@ func TestAIMatchDifficultiesFlow(t *testing.T) {
 			t.Fatalf("expected AI (%s) to complete Turn 2 and advance to Turn 3 for human, got turn=%d isYourTurn=%v phase=%s",
 				diff, afterEnd.View.TurnNumber, afterEnd.View.IsYourTurn, afterEnd.View.Phase)
 		}
+		if len(afterEnd.View.RecentSteps) < 2 {
+			t.Fatalf("expected AI (%s) turn to record step-by-step ActionStepSnapshots in RecentSteps, got %d",
+				diff, len(afterEnd.View.RecentSteps))
+		}
 	}
 }

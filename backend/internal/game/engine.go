@@ -31,6 +31,78 @@ func (g *GameState) addLog(msg string) {
 	})
 }
 
+func sanitizePlayerState(p *PlayerState, includeHand bool) SanitizedPlayerView {
+	if p == nil {
+		return SanitizedPlayerView{
+			Board: map[ZoneID][]CardInstance{
+				ZoneCity:   {},
+				ZoneRoad:   {},
+				ZoneCombat: {},
+			},
+		}
+	}
+	view := SanitizedPlayerView{
+		ID:                p.ID,
+		Name:              p.Name,
+		DevelopmentPoints: p.DevelopmentPoints,
+		CitizenCount:      p.TotalCitizensOnBoard(),
+		MulliganDone:      p.MulliganDone,
+		DeckCount:         len(p.Deck),
+		HandCount:         len(p.Hand),
+		Discard:           make([]CardInstance, 0, len(p.Discard)),
+		Exile:             make([]CardInstance, 0, len(p.Exile)),
+		Board: map[ZoneID][]CardInstance{
+			ZoneCity:   {},
+			ZoneRoad:   {},
+			ZoneCombat: {},
+		},
+	}
+	if includeHand {
+		view.Hand = make([]CardInstance, 0, len(p.Hand))
+		for _, c := range p.Hand {
+			view.Hand = append(view.Hand, c.Clone())
+		}
+	}
+	for _, c := range p.Discard {
+		view.Discard = append(view.Discard, c.Clone())
+	}
+	for _, c := range p.Exile {
+		view.Exile = append(view.Exile, c.Clone())
+	}
+	for _, z := range []ZoneID{ZoneCity, ZoneRoad, ZoneCombat} {
+		for _, c := range p.Board[z] {
+			view.Board[z] = append(view.Board[z], c.Clone())
+		}
+	}
+	return view
+}
+
+func (g *GameState) recordAnimStep(ev ActionAnimationEvent) {
+	g.nextAnimSeq++
+	ev.Seq = g.nextAnimSeq
+
+	activeID := ""
+	if g.Players[g.ActivePlayerIdx] != nil {
+		activeID = g.Players[g.ActivePlayerIdx].ID
+	}
+
+	rec := rawStepRecord{
+		Event: ev,
+		PlayersSnapshot: [2]SanitizedPlayerView{
+			sanitizePlayerState(g.Players[0], true),
+			sanitizePlayerState(g.Players[1], true),
+		},
+		TurnNumber:     g.TurnNumber,
+		Phase:          g.Phase,
+		ActivePlayerID: activeID,
+	}
+
+	g.animSteps = append(g.animSteps, rec)
+	if len(g.animSteps) > 28 {
+		g.animSteps = g.animSteps[len(g.animSteps)-28:]
+	}
+}
+
 func (g *GameState) nextInstanceID(prefix string) string {
 	g.nextInstanceSeq++
 	return fmt.Sprintf("%s_%d", prefix, g.nextInstanceSeq)
@@ -230,6 +302,15 @@ func (g *GameState) beginTurn(playerIdx int) {
 	// From Combat Zone to City, and right-to-left within each row.
 	g.queueBoardTriggers(active, TriggerTurnStart)
 	g.processEffectQueue(PhaseMain)
+
+	if g.TurnNumber > 1 {
+		g.recordAnimStep(ActionAnimationEvent{
+			Type:       AnimTurnStart,
+			ActorID:    active.ID,
+			ActorName:  active.Name,
+			BannerText: fmt.Sprintf("🔔 Turno %d — %s", g.TurnNumber, active.Name),
+		})
+	}
 }
 
 // queueBoardTriggers collects triggers from a player's board ordered Combat -> Road -> City, right-to-left.
@@ -319,6 +400,19 @@ func (g *GameState) PlayCard(playerID, cardInstanceID string, targetZone ZoneID)
 
 		g.addLog(fmt.Sprintf("%s jugó a %s (%dV) en %s.", p.Name, card.Definition.Name, card.CurrentVitality, zoneDisplayName(targetZone)))
 
+		defCopy := card.Definition
+		g.recordAnimStep(ActionAnimationEvent{
+			Type:           AnimPlayCitizen,
+			ActorID:        p.ID,
+			ActorName:      p.Name,
+			CardInstanceID: card.InstanceID,
+			CardName:       card.Definition.Name,
+			CardDefinition: &defCopy,
+			FromZone:       ZoneHand,
+			ToZone:         targetZone,
+			BannerText:     fmt.Sprintf("%s despliega a %s (%dV) en %s", p.Name, card.Definition.Name, card.CurrentVitality, zoneDisplayName(targetZone)),
+		})
+
 		// Queue "Al jugar" abilities (not triggered when summoned by an effect)
 		for _, ab := range card.Definition.Abilities {
 			if ab.Trigger == TriggerOnPlay {
@@ -360,6 +454,19 @@ func (g *GameState) PlayCard(playerID, cardInstanceID string, targetZone ZoneID)
 	g.PlaysRemaining--
 
 	g.addLog(fmt.Sprintf("%s jugó el evento %s.", p.Name, card.Definition.Name))
+
+	defCopy := card.Definition
+	g.recordAnimStep(ActionAnimationEvent{
+		Type:           AnimPlayEvent,
+		ActorID:        p.ID,
+		ActorName:      p.Name,
+		CardInstanceID: card.InstanceID,
+		CardName:       card.Definition.Name,
+		CardDefinition: &defCopy,
+		FromZone:       ZoneHand,
+		ToZone:         ZoneDiscard,
+		BannerText:     fmt.Sprintf("📜 %s ejecuta el decreto: %s", p.Name, card.Definition.Name),
+	})
 
 	for _, ab := range card.Definition.Abilities {
 		if ab.Trigger == TriggerImmediate || ab.Trigger == TriggerOnPlay {
@@ -418,6 +525,16 @@ func (g *GameState) MoveCitizen(playerID, cardInstanceID string, toZone ZoneID) 
 	g.MovesRemaining--
 
 	g.addLog(fmt.Sprintf("%s movió a %s de %s a %s.", p.Name, card.Definition.Name, zoneDisplayName(fromZone), zoneDisplayName(toZone)))
+	g.recordAnimStep(ActionAnimationEvent{
+		Type:           AnimMoveCitizen,
+		ActorID:        p.ID,
+		ActorName:      p.Name,
+		CardInstanceID: card.InstanceID,
+		CardName:       card.Definition.Name,
+		FromZone:       fromZone,
+		ToZone:         toZone,
+		BannerText:     fmt.Sprintf("👣 %s marcha con %s: %s → %s", p.Name, card.Definition.Name, zoneDisplayName(fromZone), zoneDisplayName(toZone)),
+	})
 	g.bumpVersion()
 	return nil
 }
@@ -489,13 +606,38 @@ func (g *GameState) AttackCitizen(playerID, attackerID, defenderID string) error
 	attacker.AttackedThisTurn = true
 	defender.CurrentVitality -= dmg
 
-	g.addLog(fmt.Sprintf("%s (%dV) atacó a %s en %s causando %d de daño.",
-		attacker.Definition.Name, attacker.CurrentVitality, defender.Definition.Name, zoneDisplayName(defZone), dmg))
+	g.addLog(fmt.Sprintf("%s: %s (%dV) atacó a %s en %s causando %d de daño.",
+		p.Name, attacker.Definition.Name, attacker.CurrentVitality, defender.Definition.Name, zoneDisplayName(defZone), dmg))
 
-	if defender.CurrentVitality <= 0 {
+	var targetSnap *CardInstance
+	destroyed := defender.CurrentVitality <= 0
+	if destroyed {
+		cp := defender.Clone()
+		cp.CurrentVitality = 0
+		targetSnap = &cp
 		g.destroyBoardCard(opp, defender.InstanceID)
 		g.addLog(fmt.Sprintf("%s fue destruido.", defender.Definition.Name))
 	}
+
+	banner := fmt.Sprintf("⚔️ %s: %s ataca a %s (-%dV)", p.Name, attacker.Definition.Name, defender.Definition.Name, dmg)
+	if destroyed {
+		banner = fmt.Sprintf("⚔️ %s: %s ataca y destruye a %s (-%dV)", p.Name, attacker.Definition.Name, defender.Definition.Name, dmg)
+	}
+	g.recordAnimStep(ActionAnimationEvent{
+		Type:               AnimAttack,
+		ActorID:            p.ID,
+		ActorName:          p.Name,
+		CardInstanceID:     attacker.InstanceID,
+		CardName:           attacker.Definition.Name,
+		FromZone:           ZoneCombat,
+		ToZone:             defZone,
+		TargetCardID:       defender.InstanceID,
+		TargetCardName:     defender.Definition.Name,
+		TargetCardSnapshot: targetSnap,
+		Amount:             -dmg,
+		Destroyed:          destroyed,
+		BannerText:         banner,
+	})
 
 	g.bumpVersion()
 	return nil
@@ -671,6 +813,7 @@ func (g *GameState) executeEffectStepWithTarget(qe QueuedEffect, chosenTargetID 
 			}
 		}
 
+		var lastTokenID string
 		for i := 0; i < tokenDef.Count; i++ {
 			inst := &CardInstance{
 				InstanceID: g.nextInstanceID("token"),
@@ -691,9 +834,19 @@ func (g *GameState) executeEffectStepWithTarget(qe QueuedEffect, chosenTargetID 
 				PlayedThisTurn:   true,
 				AttackedThisTurn: false,
 			}
+			lastTokenID = inst.InstanceID
 			controller.Board[destZone] = append(controller.Board[destZone], inst)
 		}
 		g.addLog(fmt.Sprintf("%s invocó %d %s (%dV) en %s.", controller.Name, tokenDef.Count, tokenDef.Name, tokenDef.Vitality, zoneDisplayName(destZone)))
+		g.recordAnimStep(ActionAnimationEvent{
+			Type:           AnimEffect,
+			ActorID:        controller.ID,
+			ActorName:      controller.Name,
+			CardInstanceID: lastTokenID,
+			CardName:       tokenDef.Name,
+			ToZone:         destZone,
+			BannerText:     fmt.Sprintf("✨ %s invoca %d %s (%dV) en %s", qe.SourceCardName, tokenDef.Count, tokenDef.Name, tokenDef.Vitality, zoneDisplayName(destZone)),
+		})
 
 	case EffectDrawCards:
 		amount := step.Amount
@@ -715,11 +868,29 @@ func (g *GameState) executeEffectStepWithTarget(qe QueuedEffect, chosenTargetID 
 				continue
 			}
 			t.CurrentVitality -= dmg
-			g.addLog(fmt.Sprintf("%s hizo %d de daño a %s.", qe.SourceCardName, dmg, t.Definition.Name))
-			if t.CurrentVitality <= 0 {
+			g.addLog(fmt.Sprintf("%s (%s) hizo %d de daño a %s.", qe.SourceCardName, controller.Name, dmg, t.Definition.Name))
+			var targetSnap *CardInstance
+			destroyed := t.CurrentVitality <= 0
+			if destroyed {
+				cp := t.Clone()
+				cp.CurrentVitality = 0
+				targetSnap = &cp
 				g.destroyBoardCard(ownerPlayer, t.InstanceID)
 				g.addLog(fmt.Sprintf("%s fue destruido.", t.Definition.Name))
 			}
+			g.recordAnimStep(ActionAnimationEvent{
+				Type:               AnimEffect,
+				ActorID:            controller.ID,
+				ActorName:          controller.Name,
+				CardInstanceID:     qe.SourceCardID,
+				CardName:           qe.SourceCardName,
+				TargetCardID:       t.InstanceID,
+				TargetCardName:     t.Definition.Name,
+				TargetCardSnapshot: targetSnap,
+				Amount:             -dmg,
+				Destroyed:          destroyed,
+				BannerText:         fmt.Sprintf("🔥 %s (%s) inflige -%dV a %s", qe.SourceCardName, controller.Name, dmg, t.Definition.Name),
+			})
 		}
 
 	case EffectDestroy:
@@ -729,8 +900,22 @@ func (g *GameState) executeEffectStepWithTarget(qe QueuedEffect, chosenTargetID 
 			if ownerPlayer == nil {
 				continue
 			}
+			cp := t.Clone()
+			cp.CurrentVitality = 0
 			g.destroyBoardCard(ownerPlayer, t.InstanceID)
-			g.addLog(fmt.Sprintf("%s destruyó a %s.", qe.SourceCardName, t.Definition.Name))
+			g.addLog(fmt.Sprintf("%s (%s) destruyó a %s.", qe.SourceCardName, controller.Name, t.Definition.Name))
+			g.recordAnimStep(ActionAnimationEvent{
+				Type:               AnimEffect,
+				ActorID:            controller.ID,
+				ActorName:          controller.Name,
+				CardInstanceID:     qe.SourceCardID,
+				CardName:           qe.SourceCardName,
+				TargetCardID:       t.InstanceID,
+				TargetCardName:     t.Definition.Name,
+				TargetCardSnapshot: &cp,
+				Destroyed:          true,
+				BannerText:         fmt.Sprintf("💀 %s (%s) destruye a %s", qe.SourceCardName, controller.Name, t.Definition.Name),
+			})
 		}
 
 	case EffectMoveZone:
@@ -745,11 +930,20 @@ func (g *GameState) executeEffectStepWithTarget(qe QueuedEffect, chosenTargetID 
 				continue
 			}
 			g.moveCardToZone(ownerPlayer, t.InstanceID, dest)
-			g.addLog(fmt.Sprintf("%s movió a %s hacia %s.", qe.SourceCardName, t.Definition.Name, zoneDisplayName(dest)))
+			g.addLog(fmt.Sprintf("%s (%s) movió a %s hacia %s.", qe.SourceCardName, controller.Name, t.Definition.Name, zoneDisplayName(dest)))
 			if step.ShuffleDeck {
 				g.shuffleDeck(ownerPlayer)
 				g.addLog(fmt.Sprintf("%s mezcló su mazo.", ownerPlayer.Name))
 			}
+			g.recordAnimStep(ActionAnimationEvent{
+				Type:           AnimEffect,
+				ActorID:        controller.ID,
+				ActorName:      controller.Name,
+				CardInstanceID: t.InstanceID,
+				CardName:       t.Definition.Name,
+				ToZone:         dest,
+				BannerText:     fmt.Sprintf("✨ %s (%s) mueve a %s hacia %s", qe.SourceCardName, controller.Name, t.Definition.Name, zoneDisplayName(dest)),
+			})
 		}
 
 	case EffectModifyStat:
@@ -764,11 +958,29 @@ func (g *GameState) executeEffectStepWithTarget(qe QueuedEffect, chosenTargetID 
 			if delta > 0 && t.CurrentVitality > t.BaseVitality {
 				t.BaseVitality = t.CurrentVitality
 			}
-			g.addLog(fmt.Sprintf("%s modificó la Vitalidad de %s en %+d (ahora %dV).", qe.SourceCardName, t.Definition.Name, delta, t.CurrentVitality))
-			if t.CurrentVitality <= 0 {
+			g.addLog(fmt.Sprintf("%s (%s) modificó la Vitalidad de %s en %+d (ahora %dV).", qe.SourceCardName, controller.Name, t.Definition.Name, delta, t.CurrentVitality))
+			var targetSnap *CardInstance
+			destroyed := t.CurrentVitality <= 0
+			if destroyed {
+				cp := t.Clone()
+				cp.CurrentVitality = 0
+				targetSnap = &cp
 				g.destroyBoardCard(ownerPlayer, t.InstanceID)
 				g.addLog(fmt.Sprintf("%s fue destruido.", t.Definition.Name))
 			}
+			g.recordAnimStep(ActionAnimationEvent{
+				Type:               AnimEffect,
+				ActorID:            controller.ID,
+				ActorName:          controller.Name,
+				CardInstanceID:     qe.SourceCardID,
+				CardName:           qe.SourceCardName,
+				TargetCardID:       t.InstanceID,
+				TargetCardName:     t.Definition.Name,
+				TargetCardSnapshot: targetSnap,
+				Amount:             delta,
+				Destroyed:          destroyed,
+				BannerText:         fmt.Sprintf("✨ %s (%s) modifica la Vitalidad de %s (%+dV)", qe.SourceCardName, controller.Name, t.Definition.Name, delta),
+			})
 		}
 	}
 	_ = opp
@@ -1034,6 +1246,26 @@ func (g *GameState) BuildPlayerView(playerID string) (*PlayerGameView, error) {
 		promptCopy = &cp
 	}
 
+	var recentSteps []ActionStepSnapshot
+	for _, rec := range g.animSteps {
+		youSnap := rec.PlayersSnapshot[idx]
+		var oppSnap *SanitizedPlayerView
+		if g.Players[1-idx] != nil {
+			os := rec.PlayersSnapshot[1-idx]
+			os.Hand = nil // Mask opponent hand in historical snapshots
+			oppSnap = &os
+		}
+		recentSteps = append(recentSteps, ActionStepSnapshot{
+			Event:          rec.Event,
+			You:            youSnap,
+			Opponent:       oppSnap,
+			TurnNumber:     rec.TurnNumber,
+			Phase:          rec.Phase,
+			ActivePlayerID: rec.ActivePlayerID,
+			IsYourTurn:     rec.ActivePlayerID == playerID && rec.Phase != PhaseWaitingForPlayers && rec.Phase != PhaseGameOver,
+		})
+	}
+
 	return &PlayerGameView{
 		GameID:              g.ID,
 		GameName:            g.GameName,
@@ -1054,6 +1286,7 @@ func (g *GameState) BuildPlayerView(playerID string) (*PlayerGameView, error) {
 		WinnerID:            g.WinnerID,
 		WinReason:           g.WinReason,
 		Log:                 append([]LogEntry{}, g.Log...),
+		RecentSteps:         recentSteps,
 	}, nil
 }
 

@@ -144,6 +144,42 @@ export interface LogEntry {
   message: string;
 }
 
+export type ActionAnimationType =
+  | 'PLAY_CITIZEN'
+  | 'PLAY_EVENT'
+  | 'MOVE_CITIZEN'
+  | 'ATTACK'
+  | 'EFFECT'
+  | 'TURN_START';
+
+export interface ActionAnimationEvent {
+  seq: number;
+  type: ActionAnimationType;
+  actorId: string;
+  actorName: string;
+  cardInstanceId?: string;
+  cardName?: string;
+  cardDefinition?: CardDefinition;
+  fromZone?: ZoneID;
+  toZone?: ZoneID;
+  targetCardId?: string;
+  targetCardName?: string;
+  targetCardSnapshot?: CardInstance;
+  amount?: number;
+  destroyed?: boolean;
+  bannerText: string;
+}
+
+export interface ActionStepSnapshot {
+  event: ActionAnimationEvent;
+  you: SanitizedPlayerView;
+  opponent?: SanitizedPlayerView;
+  turnNumber: number;
+  phase: GamePhase;
+  activePlayerId: string;
+  isYourTurn: boolean;
+}
+
 export interface SanitizedPlayerView {
   id: string;
   name: string;
@@ -178,6 +214,7 @@ export interface PlayerGameView {
   winnerId?: string;
   winReason?: string;
   log: LogEntry[];
+  recentSteps?: ActionStepSnapshot[];
 }
 
 export interface LobbySummary {

@@ -97,6 +97,57 @@ type LogEntry struct {
 	Message string    `json:"message"`
 }
 
+// ActionAnimationType describes the visual action for step-by-step frontend playback.
+type ActionAnimationType string
+
+const (
+	AnimPlayCitizen ActionAnimationType = "PLAY_CITIZEN"
+	AnimPlayEvent   ActionAnimationType = "PLAY_EVENT"
+	AnimMoveCitizen ActionAnimationType = "MOVE_CITIZEN"
+	AnimAttack      ActionAnimationType = "ATTACK"
+	AnimEffect      ActionAnimationType = "EFFECT"
+	AnimTurnStart   ActionAnimationType = "TURN_START"
+)
+
+// ActionAnimationEvent carries metadata about a discrete game action or effect.
+type ActionAnimationEvent struct {
+	Seq                int64               `json:"seq"`
+	Type               ActionAnimationType `json:"type"`
+	ActorID            string              `json:"actorId"`
+	ActorName          string              `json:"actorName"`
+	CardInstanceID     string              `json:"cardInstanceId,omitempty"`
+	CardName           string              `json:"cardName,omitempty"`
+	CardDefinition     *CardDefinition     `json:"cardDefinition,omitempty"`
+	FromZone           ZoneID              `json:"fromZone,omitempty"`
+	ToZone             ZoneID              `json:"toZone,omitempty"`
+	TargetCardID       string              `json:"targetCardId,omitempty"`
+	TargetCardName     string              `json:"targetCardName,omitempty"`
+	TargetCardSnapshot *CardInstance       `json:"targetCardSnapshot,omitempty"`
+	Amount             int                 `json:"amount,omitempty"`
+	Destroyed          bool                `json:"destroyed,omitempty"`
+	BannerText         string              `json:"bannerText"`
+}
+
+type rawStepRecord struct {
+	Event           ActionAnimationEvent
+	PlayersSnapshot [2]SanitizedPlayerView
+	TurnNumber      int
+	Phase           GamePhase
+	ActivePlayerID  string
+}
+
+// ActionStepSnapshot is a player-perspective step sent in PlayerGameView.RecentSteps
+// so the frontend can replay AI and opponent actions one by one with animations.
+type ActionStepSnapshot struct {
+	Event          ActionAnimationEvent `json:"event"`
+	You            SanitizedPlayerView  `json:"you"`
+	Opponent       *SanitizedPlayerView `json:"opponent,omitempty"`
+	TurnNumber     int                  `json:"turnNumber"`
+	Phase          GamePhase            `json:"phase"`
+	ActivePlayerID string               `json:"activePlayerId"`
+	IsYourTurn     bool                 `json:"isYourTurn"`
+}
+
 // GameState is the authoritative state of a match.
 type GameState struct {
 	ID              string          `json:"id"`
@@ -116,6 +167,8 @@ type GameState struct {
 	Log             []LogEntry      `json:"log"`
 	StateVersion    int64           `json:"stateVersion"`
 	nextInstanceSeq int
+	nextAnimSeq     int64
+	animSteps       []rawStepRecord
 }
 
 // SanitizedPlayerView is a player's state with hidden cards (Deck/Opponent Hand) masked as counts.
@@ -154,4 +207,5 @@ type PlayerGameView struct {
 	WinnerID            string               `json:"winnerId,omitempty"`
 	WinReason           string               `json:"winReason,omitempty"`
 	Log                 []LogEntry           `json:"log"`
+	RecentSteps         []ActionStepSnapshot `json:"recentSteps,omitempty"`
 }

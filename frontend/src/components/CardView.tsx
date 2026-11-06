@@ -18,6 +18,18 @@ import { CardArt } from './CardArt';
 
 export type CardSize = 'board' | 'hand' | 'md' | 'lg';
 
+export interface CardAnimEffect {
+  kind:
+    | 'summon'
+    | 'march'
+    | 'attack-up'
+    | 'attack-down'
+    | 'damaged'
+    | 'destroyed'
+    | 'buffed';
+  amount?: number;
+}
+
 interface CardViewProps {
   card: CardDefinition;
   instance?: CardInstance;
@@ -29,6 +41,7 @@ interface CardViewProps {
   canAttack?: boolean;
   canMove?: boolean;
   badgeCount?: number;
+  animEffect?: CardAnimEffect;
   onClick?: () => void;
   onMouseEnter?: () => void;
   onMouseLeave?: () => void;
@@ -75,6 +88,7 @@ export const CardView: React.FC<CardViewProps> = ({
   canAttack = false,
   canMove = false,
   badgeCount,
+  animEffect,
   onClick,
   onMouseEnter,
   onMouseLeave,
@@ -103,6 +117,23 @@ export const CardView: React.FC<CardViewProps> = ({
     ? 'ring-1 ring-[#f3d46b] drop-shadow-[0_8px_16px_rgba(197,155,39,0.55)]'
     : 'drop-shadow-[0_10px_15px_rgba(0,0,0,0.85)]';
 
+  const animClass =
+    animEffect?.kind === 'summon'
+      ? 'anim-card-summon ring-2 ring-[#fef08a]'
+      : animEffect?.kind === 'march'
+      ? 'anim-card-march ring-2 ring-[#fde68a]'
+      : animEffect?.kind === 'attack-up'
+      ? 'anim-attack-up ring-2 ring-[#f87171]'
+      : animEffect?.kind === 'attack-down'
+      ? 'anim-attack-down ring-2 ring-[#f87171]'
+      : animEffect?.kind === 'damaged'
+      ? 'anim-damage-shake ring-2 ring-[#ef4444]'
+      : animEffect?.kind === 'destroyed'
+      ? 'anim-card-destroyed ring-2 ring-[#dc2626]'
+      : animEffect?.kind === 'buffed'
+      ? 'anim-buff-pulse ring-2 ring-[#4ade80]'
+      : '';
+
   // ===========================================================================
   // 1. BOARD UNIT / TOKEN MODE (Compact Imposing Gwent/Thronebreaker Token)
   // ===========================================================================
@@ -112,10 +143,51 @@ export const CardView: React.FC<CardViewProps> = ({
         onClick={onClick}
         onMouseEnter={onMouseEnter}
         onMouseLeave={onMouseLeave}
-        className={`group relative w-[114px] h-[78px] rounded-md p-[2.5px] border ${outerBevel} transition-all duration-150 select-none ${
+        className={`group relative w-[110px] h-[68px] rounded-md p-[2.5px] border ${outerBevel} transition-all duration-150 select-none ${
           onClick ? 'cursor-pointer hover:scale-105 hover:z-30' : ''
-        } ${statusGlow}`}
+        } ${statusGlow} ${animClass}`}
       >
+        {/* Floating Tactical Action / Damage / Buff Popup Badge */}
+        {animEffect && (
+          <div className="pointer-events-none absolute left-1/2 -top-3 z-40 anim-float-badge whitespace-nowrap">
+            {animEffect.kind === 'damaged' && (
+              <span className="px-2 py-0.5 rounded-full bg-[#991b1b] border-2 border-[#fecaca] font-display font-black text-xs text-white shadow-[0_4px_12px_rgba(0,0,0,0.9)]">
+                {animEffect.amount || -1}V
+              </span>
+            )}
+            {animEffect.kind === 'destroyed' && (
+              <span className="px-2 py-0.5 rounded-full bg-[#450a0a] border-2 border-[#f87171] font-display font-black text-[11px] text-[#fecaca] shadow-[0_4px_12px_rgba(0,0,0,0.95)] flex items-center gap-1">
+                {animEffect.amount ? `${animEffect.amount}V ` : ''}💀 CAÍDO
+              </span>
+            )}
+            {animEffect.kind === 'buffed' && (
+              <span className="px-2 py-0.5 rounded-full bg-[#14532d] border-2 border-[#86efac] font-display font-black text-xs text-[#dcfce7] shadow-[0_4px_12px_rgba(0,0,0,0.9)]">
+                +{animEffect.amount || 1}V
+              </span>
+            )}
+            {(animEffect.kind === 'attack-up' ||
+              animEffect.kind === 'attack-down') && (
+              <span className="px-2 py-0.5 rounded-full bg-[#7c2d12] border border-[#fde047] font-display font-black text-[10px] text-[#fef9c3] shadow-lg">
+                ⚔️ ¡ATAQUE!
+              </span>
+            )}
+            {animEffect.kind === 'march' && (
+              <span className="px-2 py-0.5 rounded-full bg-[#292118] border border-[#f3d46b] font-display font-bold text-[10px] text-[#fef08a] shadow-lg">
+                👣 MARCHA
+              </span>
+            )}
+            {animEffect.kind === 'summon' && (
+              <span className="px-2 py-0.5 rounded-full bg-[#2b2216] border border-[#fef08a] font-display font-bold text-[10px] text-[#fef08a] shadow-lg">
+                ✨ DESPLIEGUE
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Crimson Flash Overlay when taking damage or being destroyed */}
+        {(animEffect?.kind === 'damaged' || animEffect?.kind === 'destroyed') && (
+          <div className="pointer-events-none absolute inset-0 rounded-md bg-[#dc2626]/45 z-30 animate-pulse" />
+        )}
         {/* Inner Recessed Portrait Box */}
         <div className="relative w-full h-full rounded-[3px] overflow-hidden bg-[#14110e] border border-[#3a2f25] flex flex-col justify-end">
           {/* Artwork Background */}
@@ -230,14 +302,14 @@ export const CardView: React.FC<CardViewProps> = ({
   // ===========================================================================
   const dimensions =
     effectiveSize === 'hand'
-      ? 'w-[144px] h-[202px]'
+      ? 'w-[122px] h-[132px]'
       : effectiveSize === 'lg'
       ? 'w-[254px] h-[364px]'
       : 'w-[206px] h-[298px]';
 
   const artHeight =
     effectiveSize === 'hand'
-      ? 'h-[76px]'
+      ? 'h-[42px]'
       : effectiveSize === 'lg'
       ? 'h-[150px]'
       : 'h-[116px]';
@@ -247,7 +319,7 @@ export const CardView: React.FC<CardViewProps> = ({
       onClick={onClick}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
-      className={`group relative ${dimensions} rounded-lg p-[3.5px] border ${outerBevel} transition-all duration-200 select-none flex flex-col ${
+      className={`group relative ${dimensions} rounded-lg p-[3px] border ${outerBevel} transition-all duration-200 select-none flex flex-col ${
         onClick ? 'cursor-pointer' : ''
       } ${statusGlow}`}
     >
@@ -259,13 +331,13 @@ export const CardView: React.FC<CardViewProps> = ({
       )}
 
       {/* Inner Dark Wood & Aged Leather Card Body */}
-      <div className="w-full h-full rounded-[5px] bg-gradient-to-b from-[#28211b] via-[#1c1714] to-[#120f0d] border border-[#e3c158]/45 p-1.5 flex flex-col justify-between overflow-hidden relative shadow-inner">
+      <div className="w-full h-full rounded-[5px] bg-gradient-to-b from-[#28211b] via-[#1c1714] to-[#120f0d] border border-[#e3c158]/45 p-1 flex flex-col justify-between overflow-hidden relative shadow-inner">
         {/* 1. Top Metallic/Parchment Nameplate Banner (Allows 2 lines with tracking-tight so names never truncate!) */}
-        <div className="relative z-10 flex items-center justify-between gap-1 px-1.5 py-1 rounded-sm bg-gradient-to-r from-[#1f1914] via-[#302720] to-[#1f1914] border border-[#c59b27]/75 shadow-[inset_0_1px_0_rgba(255,255,255,0.14)] min-h-[28px]">
+        <div className="relative z-10 flex items-center justify-between gap-1 px-1.5 py-0.5 rounded-sm bg-gradient-to-r from-[#1f1914] via-[#302720] to-[#1f1914] border border-[#c59b27]/75 shadow-[inset_0_1px_0_rgba(255,255,255,0.14)] min-h-[24px]">
           <span
-            className={`font-display font-bold text-[#f7efe0] tracking-tight leading-[1.08] line-clamp-2 ${
+            className={`font-display font-bold text-[#f7efe0] tracking-tight leading-[1.06] line-clamp-2 ${
               effectiveSize === 'hand'
-                ? 'text-[9.5px]'
+                ? 'text-[9px]'
                 : effectiveSize === 'lg'
                 ? 'text-[12.5px]'
                 : 'text-[10.5px]'
@@ -278,8 +350,8 @@ export const CardView: React.FC<CardViewProps> = ({
           {/* Compact Top-Right Forged Shield Crest for Citizens or Arcane Crest for Events */}
           {isCitizen ? (
             <div
-              className={`shrink-0 flex items-center px-1.5 py-0.5 rounded-sm font-display font-black border shadow ${
-                effectiveSize === 'hand' ? 'text-[9.5px]' : 'text-[11px]'
+              className={`shrink-0 flex items-center px-1 py-0.2 rounded-sm font-display font-black border shadow ${
+                effectiveSize === 'hand' ? 'text-[9px]' : 'text-[11px]'
               } ${
                 isDamaged
                   ? 'bg-[#7f1d1d] border-[#fca5a5] text-[#fecaca]'
@@ -290,40 +362,40 @@ export const CardView: React.FC<CardViewProps> = ({
             </div>
           ) : (
             <span className="shrink-0 text-[#e2e8f0] pl-0.5">
-              {renderCardIcon(card.artIcon, 'w-3.5 h-3.5')}
+              {renderCardIcon(card.artIcon, 'w-3 h-3')}
             </span>
           )}
         </div>
 
         {/* 2. Beveled Illustration Frame */}
         <div
-          className={`relative z-10 mt-1 ${artHeight} w-full rounded-sm overflow-hidden border border-[#c59b27]/80 shadow-[inset_0_0_12px_rgba(0,0,0,0.9)] shrink-0`}
+          className={`relative z-10 mt-0.5 ${artHeight} w-full rounded-sm overflow-hidden border border-[#c59b27]/80 shadow-[inset_0_0_12px_rgba(0,0,0,0.9)] shrink-0`}
         >
           <CardArt card={card} className="w-full h-full" />
         </div>
 
         {/* 3. Faction / Type Ribbon */}
-        <div className="relative z-10 mt-1 px-1.5 py-0.5 bg-[#16120f] border-y border-[#6b5a48] flex items-center justify-between">
+        <div className="relative z-10 mt-0.5 px-1 py-0.2 bg-[#16120f] border-y border-[#6b5a48] flex items-center justify-between">
           <span
             className={`font-display uppercase tracking-wider font-bold ${
-              effectiveSize === 'hand' ? 'text-[7.5px]' : 'text-[8.5px]'
+              effectiveSize === 'hand' ? 'text-[6.8px]' : 'text-[8.5px]'
             } ${isCitizen ? 'text-[#e3c158]' : 'text-[#c7d2fe]'}`}
           >
             {isCitizen ? 'Ciudadano • Bastión' : 'Evento • Decreto'}
           </span>
           {card.isCustom && (
-            <span className="text-[7.5px] font-display uppercase px-1 rounded-sm bg-[#3a2e21] text-[#f3d46b] border border-[#c59b27]/50">
+            <span className="text-[7px] font-display uppercase px-1 rounded-sm bg-[#3a2e21] text-[#f3d46b] border border-[#c59b27]/50">
               Forjada
             </span>
           )}
         </div>
 
         {/* 4. Dark Parchment Rules Text Box */}
-        <div className="relative z-10 mt-1 flex-1 rounded-sm bg-gradient-to-b from-[#211b16] to-[#15110e] border border-[#574c3f] p-1.5 flex flex-col justify-between overflow-hidden shadow-[inset_0_2px_6px_rgba(0,0,0,0.75)]">
+        <div className="relative z-10 mt-0.5 flex-1 rounded-sm bg-gradient-to-b from-[#211b16] to-[#15110e] border border-[#574c3f] p-1 flex flex-col justify-between overflow-hidden shadow-[inset_0_2px_6px_rgba(0,0,0,0.75)]">
           <p
-            className={`font-serif text-[#ede5d8] leading-snug ${
+            className={`font-serif text-[#ede5d8] leading-tight ${
               effectiveSize === 'hand'
-                ? 'text-[9.5px] line-clamp-3'
+                ? 'text-[8.5px] line-clamp-2'
                 : effectiveSize === 'lg'
                 ? 'text-[13px]'
                 : 'text-[11px] line-clamp-4'
@@ -333,7 +405,7 @@ export const CardView: React.FC<CardViewProps> = ({
           </p>
 
           {footerAction && (
-            <div className="mt-1 pt-1 border-t border-[#3a322a]">
+            <div className="mt-0.5 pt-0.5 border-t border-[#3a322a]">
               {footerAction}
             </div>
           )}

@@ -1,11 +1,13 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Archive,
   ArrowLeft,
+  Bot,
   Check,
   ChevronDown,
   ChevronUp,
   Crown,
+  FastForward,
   Flame,
   Info,
   Layers,
@@ -21,6 +23,7 @@ import {
 } from 'lucide-react';
 import {
   ActionRequest,
+  ActionStepSnapshot,
   CardDefinition,
   CardInstance,
   GamePhase,
@@ -28,7 +31,7 @@ import {
   ZoneID,
 } from '../types/game';
 import { pollGameState, submitGameAction } from '../services/api';
-import { CardView } from './CardView';
+import { CardAnimEffect, CardView } from './CardView';
 
 interface GameBoardViewProps {
   lobbyId: string;
@@ -142,9 +145,21 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
   initialView,
   onExitLobby,
 }) => {
-  const [view, setView] = useState<PlayerGameView>(initialView);
+  const [serverView, setServerView] = useState<PlayerGameView>(initialView);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  // Step-by-step Animation Playback Queue (for AI turns & Player actions)
+  const initialSeq =
+    initialView.recentSteps && initialView.recentSteps.length > 0
+      ? initialView.recentSteps[initialView.recentSteps.length - 1].event.seq
+      : 0;
+  const lastQueuedSeqRef = useRef<number>(initialSeq);
+
+  const [animQueue, setAnimQueue] = useState<ActionStepSnapshot[]>([]);
+  const [activeStep, setActiveStep] = useState<ActionStepSnapshot | null>(null);
+  const [seqTotalCount, setSeqTotalCount] = useState(0);
+  const [seqCurrentIdx, setSeqCurrentIdx] = useState(0);
 
   // Selection states during MAIN phase
   const [selectedHandCardId, setSelectedHandCardId] = useState<string | null>(null);
@@ -168,6 +183,67 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
     cards: CardInstance[];
   } | null>(null);
 
+  // Ingest incoming PlayerGameView and enqueue any unseen animation steps
+  const ingestIncomingView = useCallback((nextView: PlayerGameView) => {
+    setServerView(nextView);
+    const incomingSteps = nextView.recentSteps || [];
+    const unseen = incomingSteps.filter(
+      (s) => s.event.seq > lastQueuedSeqRef.current
+    );
+    if (unseen.length > 0) {
+      lastQueuedSeqRef.current = unseen[unseen.length - 1].event.seq;
+      setAnimQueue((prev) => {
+        const combined = [...prev, ...unseen];
+        setSeqTotalCount((oldTotal) =>
+          prev.length === 0 ? unseen.length : oldTotal + unseen.length
+        );
+        return combined;
+      });
+    }
+  }, []);
+
+  // Step-by-step playback effect
+  useEffect(() => {
+    if (activeStep !== null) {
+      return;
+    }
+    if (animQueue.length === 0) {
+      setSeqTotalCount(0);
+      setSeqCurrentIdx(0);
+      return;
+    }
+
+    const [nextStep, ...rest] = animQueue;
+    setAnimQueue(rest);
+    setActiveStep(nextStep);
+    setSeqCurrentIdx((c) => c + 1);
+
+    // Determine duration: AI/Opponent steps play slightly longer (~1050ms) so the user can watch each move clearly;
+    // Player's own single actions play snappily (~680ms), or ~850ms if followed by AI responses.
+    const isMyAction = nextStep.event.actorId === playerId;
+    const isTurnBanner = nextStep.event.type === 'TURN_START';
+    const durationMs = isTurnBanner
+      ? 680
+      : isMyAction
+      ? rest.length > 0
+        ? 820
+        : 650
+      : 1050;
+
+    const timer = setTimeout(() => {
+      setActiveStep(null);
+    }, durationMs);
+
+    return () => clearTimeout(timer);
+  }, [activeStep, animQueue, playerId]);
+
+  const skipAnimations = () => {
+    setAnimQueue([]);
+    setActiveStep(null);
+    setSeqTotalCount(0);
+    setSeqCurrentIdx(0);
+  };
+
   // Poll backend every 1000ms
   useEffect(() => {
     let active = true;
@@ -175,7 +251,7 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
       try {
         const nextView = await pollGameState(lobbyId, playerId);
         if (active) {
-          setView(nextView);
+          ingestIncomingView(nextView);
         }
       } catch {
         // Ignore transient hiccups
@@ -185,7 +261,7 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
       active = false;
       clearInterval(timer);
     };
-  }, [lobbyId, playerId]);
+  }, [lobbyId, playerId, ingestIncomingView]);
 
   const sendAction = async (action: Omit<ActionRequest, 'playerId'>) => {
     setError(null);
@@ -195,7 +271,7 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
         playerId,
         ...action,
       });
-      setView(next);
+      ingestIncomingView(next);
       setSelectedHandCardId(null);
       setSelectedBoardCardId(null);
     } catch (err: any) {
@@ -204,6 +280,95 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
       setSubmitting(false);
     }
   };
+
+  // While an animation step is playing, display that step's intermediate board state
+  // so AI/Opponent actions appear one by one in exact chronological order!
+  const view: PlayerGameView = useMemo(() => {
+    if (!activeStep) {
+      return serverView;
+    }
+    return {
+      ...serverView,
+      you: activeStep.you,
+      opponent: activeStep.opponent,
+      turnNumber: activeStep.turnNumber,
+      phase: activeStep.phase,
+      activePlayerId: activeStep.activePlayerId,
+      isYourTurn: activeStep.isYourTurn,
+    };
+  }, [serverView, activeStep]);
+
+  const isAnimatingMultiStep = Boolean(
+    activeStep && (activeStep.event.actorId !== playerId || animQueue.length > 0)
+  );
+
+  // Map a board card instance to its current animation effect if involved in activeStep
+  const getCardAnimEffect = useCallback(
+    (inst: CardInstance): CardAnimEffect | undefined => {
+      if (!activeStep) return undefined;
+      const ev = activeStep.event;
+
+      if (ev.type === 'PLAY_CITIZEN' && ev.cardInstanceId === inst.instanceId) {
+        return { kind: 'summon' };
+      }
+      if (ev.type === 'MOVE_CITIZEN' && ev.cardInstanceId === inst.instanceId) {
+        return { kind: 'march' };
+      }
+      if (ev.type === 'ATTACK') {
+        if (ev.cardInstanceId === inst.instanceId) {
+          return {
+            kind: ev.actorId === playerId ? 'attack-up' : 'attack-down',
+          };
+        }
+        if (ev.targetCardId === inst.instanceId) {
+          return {
+            kind: ev.destroyed ? 'destroyed' : 'damaged',
+            amount: ev.amount,
+          };
+        }
+      }
+      if (ev.type === 'EFFECT') {
+        if (ev.targetCardId === inst.instanceId) {
+          if (ev.destroyed) {
+            return { kind: 'destroyed', amount: ev.amount };
+          }
+          if ((ev.amount || 0) < 0) {
+            return { kind: 'damaged', amount: ev.amount };
+          }
+          if ((ev.amount || 0) > 0) {
+            return { kind: 'buffed', amount: ev.amount };
+          }
+        }
+        if (!ev.targetCardId && ev.cardInstanceId === inst.instanceId) {
+          return { kind: 'summon' };
+        }
+      }
+      return undefined;
+    },
+    [activeStep, playerId]
+  );
+
+  // Helper to include a just-destroyed card in its row during the hit/destroy animation step
+  const getRowCardsWithDyingSnapshot = useCallback(
+    (baseCards: CardInstance[], ownerId: string | undefined, zoneId: ZoneID) => {
+      if (
+        !activeStep ||
+        !activeStep.event.destroyed ||
+        !activeStep.event.targetCardSnapshot ||
+        !ownerId
+      ) {
+        return baseCards;
+      }
+      const snap = activeStep.event.targetCardSnapshot;
+      if (snap.ownerId === ownerId && snap.zone === zoneId) {
+        if (!baseCards.some((c) => c.instanceId === snap.instanceId)) {
+          return [...baseCards, snap];
+        }
+      }
+      return baseCards;
+    },
+    [activeStep]
+  );
 
   const selectedHandCard = useMemo(
     () => view.you.hand?.find((c) => c.instanceId === selectedHandCardId) || null,
@@ -454,6 +619,74 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
             <BoardCornerFiligree position="bl" />
             <BoardCornerFiligree position="br" />
 
+            {/* ===============================================================
+                FLOATING STEP-BY-STEP TACTICAL ACTION BANNER (AI & Player)
+               =============================================================== */}
+            {activeStep && (
+              <div
+                key={activeStep.event.seq}
+                className="absolute top-2.5 left-1/2 -translate-x-1/2 z-40 pointer-events-auto anim-banner-pop"
+              >
+                <div
+                  className={`px-4 py-1.5 rounded-md border-2 shadow-[0_10px_28px_rgba(0,0,0,0.95)] flex items-center gap-3 ${
+                    activeStep.event.actorId === playerId
+                      ? 'bg-gradient-to-r from-[#1a2c3e] via-[#21384f] to-[#1a2c3e] border-[#f3d46b] text-[#fef9c3]'
+                      : 'bg-gradient-to-r from-[#3b1212] via-[#541818] to-[#3b1212] border-[#f87171] text-[#fef2f2]'
+                  }`}
+                >
+                  {activeStep.event.actorId !== playerId ? (
+                    <Bot className="w-4 h-4 text-[#fca5a5] shrink-0 animate-bounce" />
+                  ) : (
+                    <Sparkles className="w-4 h-4 text-[#f3d46b] shrink-0" />
+                  )}
+
+                  <span className="font-display font-bold text-xs tracking-wide">
+                    {activeStep.event.bannerText}
+                  </span>
+
+                  {seqTotalCount > 1 && (
+                    <span className="px-2 py-0.5 rounded bg-black/40 border border-white/20 font-display text-[10px] text-[#e7dfd3]">
+                      Paso {Math.min(seqCurrentIdx, seqTotalCount)}/{seqTotalCount}
+                    </span>
+                  )}
+
+                  {animQueue.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={skipAnimations}
+                      className="ml-1 px-2 py-0.5 rounded bg-[#14100c]/80 hover:bg-[#14100c] border border-[#c59b27]/60 font-display text-[9px] text-[#f3d46b] flex items-center gap-1"
+                    >
+                      <FastForward className="w-3 h-3" /> Saltar
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* ===============================================================
+                FLOATING EVENT / DECRETO SHOWCASE WHEN AN EVENT CARD IS PLAYED
+               =============================================================== */}
+            {activeStep &&
+              activeStep.event.type === 'PLAY_EVENT' &&
+              activeStep.event.cardDefinition && (
+                <div
+                  key={`event_${activeStep.event.seq}`}
+                  className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center bg-black/35 backdrop-blur-[1px]"
+                >
+                  <div className="anim-card-summon flex flex-col items-center gap-2 p-4 rounded-xl bg-gradient-to-b from-[#2b2118]/95 to-[#14100c]/95 border-2 border-[#f3d46b] shadow-[0_20px_50px_rgba(0,0,0,0.95)]">
+                    <div className="font-display text-xs font-bold uppercase tracking-widest text-[#f3d46b] flex items-center gap-1.5">
+                      <Flame className="w-4 h-4 text-[#f87171]" />
+                      Decreto Ejecutado por {activeStep.event.actorName}
+                    </div>
+                    <CardView
+                      card={activeStep.event.cardDefinition}
+                      vitalityMode={view.rules.vitalityMode}
+                      size="md"
+                    />
+                  </div>
+                </div>
+              )}
+
             {/* OPPONENT 3 ROWS (City -> Road -> Combat) */}
             <div className="flex-1 min-h-0 grid grid-rows-3 gap-1 relative z-10">
               {(
@@ -463,10 +696,16 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
                   { id: 'combat', label: 'Zona de Combate', subtitle: 'Vanguardia Enemiga' },
                 ] as const
               ).map((zone) => {
-                const cards = view.opponent?.board[zone.id] || [];
+                const rawCards = view.opponent?.board[zone.id] || [];
+                const cards = getRowCardsWithDyingSnapshot(
+                  rawCards,
+                  view.opponent?.id,
+                  zone.id
+                );
                 const isClosestAttackRow =
+                  !isAnimatingMultiStep &&
                   Boolean(canSelectedBoardCardAttack) &&
-                  cards.some((c) => validCombatSet.has(c.instanceId));
+                  rawCards.some((c) => validCombatSet.has(c.instanceId));
 
                 return (
                   <div
@@ -487,7 +726,7 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
                         {zone.label}
                       </span>
                       <span className="text-[9px] text-[#a89b8c]">
-                        {zone.subtitle} • {cards.length}
+                        {zone.subtitle} • {rawCards.length}
                       </span>
                     </div>
 
@@ -495,8 +734,11 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
                     <div className="flex-1 flex items-center justify-center gap-3 overflow-x-auto py-0.5 relative z-10">
                       {cards.map((inst) => {
                         const isPromptTarget =
-                          isPromptForMe && validPromptSet.has(inst.instanceId);
+                          !isAnimatingMultiStep &&
+                          isPromptForMe &&
+                          validPromptSet.has(inst.instanceId);
                         const isAttackTarget =
+                          !isAnimatingMultiStep &&
                           Boolean(canSelectedBoardCardAttack) &&
                           validCombatSet.has(inst.instanceId);
                         const isTargetable = isPromptTarget || isAttackTarget;
@@ -509,11 +751,13 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
                             vitalityMode={view.rules.vitalityMode}
                             size="board"
                             isTargetable={isTargetable}
+                            animEffect={getCardAnimEffect(inst)}
                             onMouseEnter={() =>
                               setHoveredCard({ card: inst.definition, instance: inst })
                             }
                             onMouseLeave={() => setHoveredCard(null)}
                             onClick={() => {
+                              if (isAnimatingMultiStep) return;
                               if (isPromptTarget) {
                                 sendAction({
                                   type: 'SELECT_TARGET',
@@ -583,7 +827,7 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
                     </span>
                     {!view.you.mulliganDone ? (
                       <button
-                        disabled={submitting}
+                        disabled={submitting || isAnimatingMultiStep}
                         onClick={() =>
                           sendAction({
                             type: 'MULLIGAN',
@@ -616,18 +860,24 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
               {/* Right: Prominent Centerpiece "Finalizar Turno" Button */}
               <div className="relative z-10">
                 <button
-                  disabled={view.phase !== 'MAIN' || !view.isYourTurn || submitting}
+                  disabled={
+                    view.phase !== 'MAIN' ||
+                    !view.isYourTurn ||
+                    submitting ||
+                    isAnimatingMultiStep
+                  }
                   onClick={() => sendAction({ type: 'END_TURN' })}
                   className={`btn-war-gold px-5 py-1.5 rounded-md text-xs border-2 border-[#fef08a] shadow-[0_6px_20px_rgba(0,0,0,0.95)] flex items-center gap-1.5 ${
                     view.phase === 'MAIN' &&
                     view.isYourTurn &&
-                    view.playsRemaining === 0
+                    view.playsRemaining === 0 &&
+                    !isAnimatingMultiStep
                       ? 'animate-pulse ring-2 ring-[#fef08a] shadow-[0_0_24px_rgba(243,212,107,0.9)]'
                       : ''
                   }`}
                 >
                   <SkipForward className="w-4 h-4" />
-                  {view.phase === 'MAIN' && view.isYourTurn
+                  {view.phase === 'MAIN' && view.isYourTurn && !isAnimatingMultiStep
                     ? 'Finalizar Turno'
                     : 'Turno Rival'}
                 </button>
@@ -643,15 +893,23 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
                   { id: 'city', label: 'La Ciudad', subtitle: 'Tu Bastión Interior' },
                 ] as const
               ).map((zone) => {
-                const cards = view.you.board[zone.id] || [];
-                const canPlayHere = canPlaySelectedCitizenInZone(zone.id);
-                const canMoveHere = canMoveSelectedCitizenToZone(zone.id);
+                const rawCards = view.you.board[zone.id] || [];
+                const cards = getRowCardsWithDyingSnapshot(
+                  rawCards,
+                  view.you.id,
+                  zone.id
+                );
+                const canPlayHere =
+                  !isAnimatingMultiStep && canPlaySelectedCitizenInZone(zone.id);
+                const canMoveHere =
+                  !isAnimatingMultiStep && canMoveSelectedCitizenToZone(zone.id);
                 const isInteractiveRow = canPlayHere || canMoveHere;
 
                 return (
                   <div
                     key={zone.id}
                     onClick={() => {
+                      if (isAnimatingMultiStep) return;
                       if (canPlayHere && selectedHandCard) {
                         sendAction({
                           type: 'PLAY_CARD',
@@ -682,7 +940,7 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
                         {zone.label}
                       </span>
                       <span className="text-[9px] text-[#a89b8c]">
-                        {zone.subtitle} • {cards.length}
+                        {zone.subtitle} • {rawCards.length}
                       </span>
                     </div>
 
@@ -690,8 +948,12 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
                     <div className="flex-1 flex items-center justify-center gap-3 overflow-x-auto py-0.5 relative z-10">
                       {cards.map((inst) => {
                         const isPromptTarget =
-                          isPromptForMe && validPromptSet.has(inst.instanceId);
-                        const isSelected = selectedBoardCardId === inst.instanceId;
+                          !isAnimatingMultiStep &&
+                          isPromptForMe &&
+                          validPromptSet.has(inst.instanceId);
+                        const isSelected =
+                          !isAnimatingMultiStep &&
+                          selectedBoardCardId === inst.instanceId;
 
                         return (
                           <CardView
@@ -702,12 +964,15 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
                             size="board"
                             isSelected={isSelected}
                             isTargetable={isPromptTarget}
+                            animEffect={getCardAnimEffect(inst)}
                             canAttack={
+                              !isAnimatingMultiStep &&
                               view.phase === 'MAIN' &&
                               view.isYourTurn &&
                               zone.id === 'combat'
                             }
                             canMove={
+                              !isAnimatingMultiStep &&
                               view.phase === 'MAIN' &&
                               view.isYourTurn &&
                               view.movesRemaining > 0
@@ -717,6 +982,7 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
                             }
                             onMouseLeave={() => setHoveredCard(null)}
                             onClick={() => {
+                              if (isAnimatingMultiStep) return;
                               if (isPromptTarget) {
                                 sendAction({
                                   type: 'SELECT_TARGET',
@@ -756,34 +1022,26 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
           </div>
 
           {/* =================================================================
-              DEDICATED BOTTOM HAND DOCK (Never covers "Tu Ciudad"!)
+              DEDICATED BOTTOM HAND DOCK (100% contained below the War-Table,
+              never overlaps "La Ciudad" or any board action buttons!)
              ================================================================= */}
-          <div className="h-[130px] shrink-0 max-w-[1180px] w-full mx-auto relative flex flex-col items-center justify-end z-30">
-            {/* Execute Event Button when an Event card is selected */}
-            {selectedHandCard &&
-              selectedHandCard.definition.type === 'event' &&
-              view.phase === 'MAIN' &&
-              view.isYourTurn &&
-              view.playsRemaining > 0 && (
-                <div className="absolute -top-9 z-50">
-                  <button
-                    disabled={submitting}
-                    onClick={() =>
-                      sendAction({
-                        type: 'PLAY_CARD',
-                        cardInstanceId: selectedHandCard.instanceId,
-                      })
-                    }
-                    className="btn-war-gold px-5 py-1 rounded-md text-xs flex items-center gap-2 shadow-[0_0_24px_rgba(243,212,107,0.85)]"
-                  >
-                    <Flame className="w-4 h-4" />
-                    Ejecutar Decreto: {selectedHandCard.definition.name}
-                  </button>
-                </div>
-              )}
+          <div className="h-[144px] shrink-0 max-w-[1180px] w-full mx-auto rounded-lg bg-gradient-to-t from-[#1c1612] via-[#15110e] to-[#110e0b] border border-[#6b5a48]/80 px-4 py-1.5 flex items-center justify-between gap-4 relative z-20 shadow-[inset_0_2px_12px_rgba(0,0,0,0.85)]">
+            {/* Left Dock Label */}
+            <div className="hidden md:flex flex-col justify-center w-36 shrink-0 border-r border-[#574c3f]/50 pr-3">
+              <span className="font-display text-[11px] font-bold uppercase tracking-wider text-[#f3d46b]">
+                Tu Mano ({handCards.length})
+              </span>
+              <span className="font-serif text-[11px] text-[#a89b8c] leading-tight mt-0.5">
+                {view.phase === 'MULLIGAN'
+                  ? 'Tocá cartas para reemplazar.'
+                  : selectedHandCard
+                  ? `Seleccionada: ${selectedHandCard.definition.name}`
+                  : 'Pasá el cursor para ampliar o tocá para jugar.'}
+              </span>
+            </div>
 
-            {/* Fanned CCG Hand sitting inside the dedicated dock */}
-            <div className="flex items-end justify-center -space-x-5 px-6">
+            {/* Center: Fanned CCG Hand sitting strictly inside the 144px dock */}
+            <div className="flex-1 flex items-center justify-center -space-x-2 overflow-x-auto py-0.5">
               {handCards.map((inst, idx) => {
                 const isMulliganSelected =
                   view.phase === 'MULLIGAN' &&
@@ -794,18 +1052,17 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
 
                 const mid = (handCards.length - 1) / 2;
                 const offset = idx - mid;
-                const rotateDeg = offset * 2.5;
-                const arcDropY = Math.abs(offset) * 2 + 56; // Docked cleanly below La Ciudad, rises on hover!
+                const rotateDeg = offset * 1.2;
 
                 return (
                   <div
                     key={inst.instanceId}
                     style={{
                       transform: isSelected
-                        ? 'translateY(-12px) scale(1.06) rotate(0deg)'
-                        : `translateY(${arcDropY}px) rotate(${rotateDeg}deg)`,
+                        ? 'translateY(-4px) scale(1.03) rotate(0deg)'
+                        : `translateY(2px) rotate(${rotateDeg}deg)`,
                     }}
-                    className="transition-all duration-200 ease-out hover:!-translate-y-12 hover:!scale-110 hover:!rotate-0 hover:z-50"
+                    className="transition-all duration-150 ease-out hover:!-translate-y-1.5 hover:!scale-[1.04] hover:!rotate-0 hover:z-30"
                   >
                     <CardView
                       card={inst.definition}
@@ -818,6 +1075,7 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
                       }
                       onMouseLeave={() => setHoveredCard(null)}
                       onClick={() => {
+                        if (isAnimatingMultiStep) return;
                         if (view.phase === 'MULLIGAN' && !view.you.mulliganDone) {
                           toggleMulliganCard(inst.instanceId);
                           return;
@@ -848,14 +1106,86 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
               })}
 
               {handCards.length === 0 && (
-                <div className="font-serif italic text-xs text-[#8c7e70] pb-10">
+                <div className="font-serif italic text-xs text-[#8c7e70]">
                   Sin cartas en la mano
+                </div>
+              )}
+            </div>
+
+            {/* Right Dock Command Slot: Contextual Action Buttons (Never covers board rows!) */}
+            <div className="w-48 shrink-0 flex flex-col items-end justify-center gap-1.5 border-l border-[#574c3f]/50 pl-3">
+              {selectedHandCard &&
+              selectedHandCard.definition.type === 'event' &&
+              view.phase === 'MAIN' &&
+              view.isYourTurn &&
+              view.playsRemaining > 0 &&
+              !isAnimatingMultiStep ? (
+                <>
+                  <button
+                    disabled={submitting}
+                    onClick={() =>
+                      sendAction({
+                        type: 'PLAY_CARD',
+                        cardInstanceId: selectedHandCard.instanceId,
+                      })
+                    }
+                    className="btn-war-gold w-full px-3 py-2 rounded text-[11px] flex items-center justify-center gap-1.5 shadow-[0_0_20px_rgba(243,212,107,0.75)]"
+                  >
+                    <Flame className="w-4 h-4 shrink-0" />
+                    <span className="truncate">Ejecutar Decreto</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedHandCardId(null)}
+                    className="btn-war-iron w-full py-1 rounded text-[10px]"
+                  >
+                    Cancelar selección
+                  </button>
+                </>
+              ) : selectedHandCard &&
+                selectedHandCard.definition.type === 'citizen' ? (
+                <>
+                  <span className="font-display text-[10px] font-bold text-[#f3d46b] text-right leading-tight">
+                    ↗ Hacé clic en una fila resaltada para desplegar
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedHandCardId(null)}
+                    className="btn-war-iron w-full py-1 rounded text-[10px]"
+                  >
+                    Cancelar selección
+                  </button>
+                </>
+              ) : selectedBoardCard ? (
+                <>
+                  <span className="font-display text-[10px] font-bold text-[#f3d46b] text-right leading-tight">
+                    ↗ Elegí fila adyacente o blanco enemigo
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedBoardCardId(null)}
+                    className="btn-war-iron w-full py-1 rounded text-[10px]"
+                  >
+                    Cancelar selección
+                  </button>
+                </>
+              ) : (
+                <div className="text-right font-serif text-[11px] text-[#8c7e70] leading-snug">
+                  Jugadas disp.:{' '}
+                  <strong className="font-display text-[#f3d46b]">
+                    {view.playsRemaining}
+                  </strong>
+                  <br />
+                  Marchas disp.:{' '}
+                  <strong className="font-display text-[#f3d46b]">
+                    {view.movesRemaining}
+                  </strong>
                 </div>
               )}
             </div>
           </div>
 
-          {/* Magnified TCG Card Preview on Hover (Left Edge) */}
+          {/* Magnified TCG Card Preview on Hover (Positioned at top-left, pointer-events-none) */}
           {hoveredCard && (
             <div className="fixed left-4 top-16 z-50 pointer-events-none">
               <CardView

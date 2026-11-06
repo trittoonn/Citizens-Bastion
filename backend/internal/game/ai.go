@@ -18,18 +18,9 @@ const (
 // AIBotID is the standard player ID for the AI opponent.
 const AIBotID = "ai_bot"
 
-// BotDisplayName returns a thematic medieval title for the AI difficulty.
-func BotDisplayName(diff AIDifficulty) string {
-	switch diff {
-	case AIDifficultyEasy:
-		return "Guardia Recluta (IA Fácil)"
-	case AIDifficultyMedium:
-		return "Capitán de la Guardia (IA Normal)"
-	case AIDifficultyHard:
-		return "Gran Mariscal del Bastión (IA Difícil)"
-	default:
-		return "Autómata del Bastión (IA)"
-	}
+// BotDisplayName returns the display name for the AI opponent in logs and HUD.
+func BotDisplayName(_ AIDifficulty) string {
+	return "IA"
 }
 
 // RunAITurnIfNeeded advances the GameState automatically whenever the AI needs to act
