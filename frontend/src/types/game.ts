@@ -85,6 +85,8 @@ export interface DeckPreset {
 
 export type VitalityMode = 'dynamic' | 'base_attack';
 
+export type AIDifficulty = '' | 'easy' | 'medium' | 'hard';
+
 export interface DeckConstraints {
   enforced: boolean;
   minCards: number;
@@ -185,6 +187,8 @@ export interface LobbySummary {
   playerCount: number;
   playerNames: string[];
   playerIds: string[];
+  vsAi?: boolean;
+  aiDifficulty?: AIDifficulty;
   rules: GameRulesConfig;
   createdAt: string;
 }

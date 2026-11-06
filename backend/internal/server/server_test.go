@@ -213,3 +213,76 @@ func TestStaticServingSPAAndPermissiveCORS(t *testing.T) {
 		}
 	}
 }
+
+func TestAIMatchDifficultiesFlow(t *testing.T) {
+	srv := NewServer(lobby.NewManager())
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	for _, diff := range []game.AIDifficulty{game.AIDifficultyEasy, game.AIDifficultyMedium, game.AIDifficultyHard} {
+		createBody, _ := json.Marshal(map[string]any{
+			"gameName":     "Duelo contra IA " + string(diff),
+			"playerId":     "human_1",
+			"playerName":   "Comandante",
+			"vsAi":         true,
+			"aiDifficulty": diff,
+		})
+		resp, err := http.Post(ts.URL+"/api/lobbies", "application/json", bytes.NewReader(createBody))
+		if err != nil || resp.StatusCode != http.StatusCreated {
+			t.Fatalf("POST /api/lobbies vsAI (%s) failed: %v status=%d", diff, err, resp.StatusCode)
+		}
+		var createRes struct {
+			Lobby lobby.LobbySummary  `json:"lobby"`
+			View  game.PlayerGameView `json:"view"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&createRes)
+		resp.Body.Close()
+
+		if !createRes.Lobby.VsAI || createRes.Lobby.AIDifficulty != diff {
+			t.Fatalf("expected lobby VsAI=true and difficulty=%s, got %+v", diff, createRes.Lobby)
+		}
+		// Since AI joined and completed its Mulligan immediately, match is already in MULLIGAN waiting only for human_1
+		if createRes.View.Phase != game.PhaseMulligan {
+			t.Fatalf("expected MULLIGAN phase right after creating AI match, got %s", createRes.View.Phase)
+		}
+
+		// Human submits Mulligan -> Turn 1 (human) starts
+		mullBody, _ := json.Marshal(lobby.ActionRequest{
+			PlayerID: "human_1",
+			Type:     lobby.ActionMulligan,
+		})
+		resp, err = http.Post(ts.URL+"/api/lobbies/"+createRes.Lobby.ID+"/action", "application/json", bytes.NewReader(mullBody))
+		if err != nil || resp.StatusCode != http.StatusOK {
+			t.Fatalf("human mulligan failed: %v", err)
+		}
+		var afterMull struct {
+			View game.PlayerGameView `json:"view"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&afterMull)
+		resp.Body.Close()
+
+		if afterMull.View.Phase != game.PhaseMain || afterMull.View.TurnNumber != 1 {
+			t.Fatalf("expected Turn 1 MAIN phase, got turn=%d phase=%s", afterMull.View.TurnNumber, afterMull.View.Phase)
+		}
+
+		// Human ends Turn 1 -> AI automatically plays Turn 2 and ends turn -> Now Turn 3 (human's turn again!)
+		endBody, _ := json.Marshal(lobby.ActionRequest{
+			PlayerID: "human_1",
+			Type:     lobby.ActionEndTurn,
+		})
+		resp, err = http.Post(ts.URL+"/api/lobbies/"+createRes.Lobby.ID+"/action", "application/json", bytes.NewReader(endBody))
+		if err != nil || resp.StatusCode != http.StatusOK {
+			t.Fatalf("human end turn failed: %v", err)
+		}
+		var afterEnd struct {
+			View game.PlayerGameView `json:"view"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&afterEnd)
+		resp.Body.Close()
+
+		if afterEnd.View.TurnNumber != 3 || !afterEnd.View.IsYourTurn {
+			t.Fatalf("expected AI (%s) to complete Turn 2 and advance to Turn 3 for human, got turn=%d isYourTurn=%v phase=%s",
+				diff, afterEnd.View.TurnNumber, afterEnd.View.IsYourTurn, afterEnd.View.Phase)
+		}
+	}
+}

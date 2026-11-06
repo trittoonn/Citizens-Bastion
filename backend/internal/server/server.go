@@ -184,11 +184,13 @@ func (s *Server) handleDefaults(w http.ResponseWriter, r *http.Request) {
 }
 
 type createLobbyRequest struct {
-	GameName   string                `json:"gameName"`
-	PlayerID   string                `json:"playerId"`
-	PlayerName string                `json:"playerName"`
-	Deck       []game.CardDefinition `json:"deck"`
-	Rules      game.GameRulesConfig  `json:"rules"`
+	GameName     string                `json:"gameName"`
+	PlayerID     string                `json:"playerId"`
+	PlayerName   string                `json:"playerName"`
+	Deck         []game.CardDefinition `json:"deck"`
+	Rules        game.GameRulesConfig  `json:"rules"`
+	VsAI         bool                  `json:"vsAi"`
+	AIDifficulty game.AIDifficulty     `json:"aiDifficulty"`
 }
 
 func (s *Server) handleLobbies(w http.ResponseWriter, r *http.Request) {
@@ -206,7 +208,11 @@ func (s *Server) handleLobbies(w http.ResponseWriter, r *http.Request) {
 		if len(req.Deck) == 0 {
 			req.Deck = game.DefaultDecks()[0].Cards
 		}
-		summary, view, err := s.manager.CreateLobby(req.GameName, req.PlayerID, req.PlayerName, req.Deck, req.Rules)
+		diff := req.AIDifficulty
+		if req.VsAI && diff == "" {
+			diff = game.AIDifficultyMedium
+		}
+		summary, view, err := s.manager.CreateLobby(req.GameName, req.PlayerID, req.PlayerName, req.Deck, req.Rules, diff)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return

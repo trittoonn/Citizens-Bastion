@@ -1,5 +1,6 @@
 import {
   ActionRequest,
+  AIDifficulty,
   CardDefinition,
   GameRulesConfig,
   LobbySummary,
@@ -66,6 +67,8 @@ export async function createLobby(params: {
   playerName: string;
   deck: CardDefinition[];
   rules: GameRulesConfig;
+  vsAi?: boolean;
+  aiDifficulty?: AIDifficulty;
 }): Promise<{ lobby: LobbySummary; view: PlayerGameView }> {
   return requestJSON<{ lobby: LobbySummary; view: PlayerGameView }>(`${API_BASE}/lobbies`, {
     method: 'POST',

@@ -11,14 +11,16 @@ import (
 
 // LobbySummary is the lightweight metadata returned when listing lobbies.
 type LobbySummary struct {
-	ID          string               `json:"id"`
-	GameName    string               `json:"gameName"`
-	Phase       game.GamePhase       `json:"phase"`
-	PlayerCount int                  `json:"playerCount"`
-	PlayerNames []string             `json:"playerNames"`
-	PlayerIDs   []string             `json:"playerIds"`
-	Rules       game.GameRulesConfig `json:"rules"`
-	CreatedAt   time.Time            `json:"createdAt"`
+	ID           string               `json:"id"`
+	GameName     string               `json:"gameName"`
+	Phase        game.GamePhase       `json:"phase"`
+	PlayerCount  int                  `json:"playerCount"`
+	PlayerNames  []string             `json:"playerNames"`
+	PlayerIDs    []string             `json:"playerIds"`
+	VsAI         bool                 `json:"vsAi"`
+	AIDifficulty game.AIDifficulty    `json:"aiDifficulty,omitempty"`
+	Rules        game.GameRulesConfig `json:"rules"`
+	CreatedAt    time.Time            `json:"createdAt"`
 }
 
 // ActionType enumerates valid player actions in a match.
@@ -46,9 +48,10 @@ type ActionRequest struct {
 }
 
 type lobbyEntry struct {
-	mu        sync.Mutex
-	state     *game.GameState
-	createdAt time.Time
+	mu           sync.Mutex
+	state        *game.GameState
+	aiDifficulty game.AIDifficulty
+	createdAt    time.Time
 }
 
 // Manager manages active in-memory game lobbies.
@@ -66,12 +69,18 @@ func NewManager() *Manager {
 }
 
 // CreateLobby creates a new game lobby and joins the creator as Player 1.
-func (m *Manager) CreateLobby(gameName, playerID, playerName string, deck []game.CardDefinition, rules game.GameRulesConfig) (*LobbySummary, *game.PlayerGameView, error) {
+// If aiDifficulty is non-empty ("easy", "medium", "hard"), an AI opponent is automatically added as Player 2.
+func (m *Manager) CreateLobby(gameName, playerID, playerName string, deck []game.CardDefinition, rules game.GameRulesConfig, aiDifficulty ...game.AIDifficulty) (*LobbySummary, *game.PlayerGameView, error) {
 	if gameName == "" {
 		return nil, nil, fmt.Errorf("el nombre de la partida es obligatorio")
 	}
 	if playerID == "" || playerName == "" {
 		return nil, nil, fmt.Errorf("el identificador y nombre del jugador son obligatorios")
+	}
+
+	var diff game.AIDifficulty
+	if len(aiDifficulty) > 0 {
+		diff = aiDifficulty[0]
 	}
 
 	m.mu.Lock()
@@ -83,9 +92,23 @@ func (m *Manager) CreateLobby(gameName, playerID, playerName string, deck []game
 		return nil, nil, err
 	}
 
+	if diff != game.AIDifficultyNone {
+		defaultDecks := game.DefaultDecks()
+		aiDeck := defaultDecks[0].Cards
+		if diff == game.AIDifficultyHard && len(defaultDecks) > 1 {
+			aiDeck = defaultDecks[1].Cards
+		}
+		if err := gs.AddPlayer(game.AIBotID, game.BotDisplayName(diff), aiDeck); err != nil {
+			m.mu.Unlock()
+			return nil, nil, err
+		}
+		gs.RunAITurnIfNeeded(game.AIBotID, diff)
+	}
+
 	entry := &lobbyEntry{
-		state:     gs,
-		createdAt: time.Now(),
+		state:        gs,
+		aiDifficulty: diff,
+		createdAt:    time.Now(),
 	}
 	m.lobbies[lobbyID] = entry
 	m.mu.Unlock()
@@ -183,6 +206,12 @@ func (m *Manager) SubmitAction(lobbyID string, req ActionRequest) (*game.PlayerG
 	if actionErr != nil {
 		return nil, actionErr
 	}
+
+	// If playing against AI, automatically execute AI responses/turns
+	if entry.aiDifficulty != game.AIDifficultyNone {
+		entry.state.RunAITurnIfNeeded(game.AIBotID, entry.aiDifficulty)
+	}
+
 	return entry.state.BuildPlayerView(req.PlayerID)
 }
 
@@ -206,13 +235,15 @@ func buildSummary(e *lobbyEntry) LobbySummary {
 		}
 	}
 	return LobbySummary{
-		ID:          e.state.ID,
-		GameName:    e.state.GameName,
-		Phase:       e.state.Phase,
-		PlayerCount: len(names),
-		PlayerNames: names,
-		PlayerIDs:   ids,
-		Rules:       e.state.Rules,
-		CreatedAt:   e.createdAt,
+		ID:           e.state.ID,
+		GameName:     e.state.GameName,
+		Phase:        e.state.Phase,
+		PlayerCount:  len(names),
+		PlayerNames:  names,
+		PlayerIDs:    ids,
+		VsAI:         e.aiDifficulty != game.AIDifficultyNone,
+		AIDifficulty: e.aiDifficulty,
+		Rules:        e.state.Rules,
+		CreatedAt:    e.createdAt,
 	}
 }

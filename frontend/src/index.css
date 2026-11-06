@@ -5,56 +5,80 @@
 @layer base {
   body {
     font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
-    background-color: #12100e;
+    background-color: #0e0c0a;
     color: #e7dfd3;
+    /* Warm candlelight / torchlight radial illumination in center + dark vignette at edges */
     background-image:
-      radial-gradient(circle at 50% 15%, rgba(66, 52, 38, 0.28) 0%, transparent 65%),
-      radial-gradient(circle at 50% 90%, rgba(38, 33, 29, 0.45) 0%, #12100e 80%);
+      radial-gradient(ellipse at 50% 32%, rgba(197, 155, 39, 0.15) 0%, rgba(62, 46, 32, 0.28) 42%, rgba(14, 12, 10, 0.96) 85%),
+      repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.012) 0px, rgba(255, 255, 255, 0.012) 2px, transparent 2px, transparent 8px);
+    background-attachment: fixed;
   }
 
   h1, h2, h3, h4, .font-epic {
     font-family: 'Cinzel', Georgia, serif;
-    letter-spacing: 0.03em;
   }
 }
 
 @layer components {
-  /* Tactile War-Table Panel (Dark Wood / Leather with Wrought-Iron & Bronze Bevel) */
+  /* Tactile War-Table Panel with differentiated header support */
   .bastion-panel {
-    background: linear-gradient(180deg, #28221e 0%, #1d1815 100%);
-    border: 1px solid #574c3f;
+    background: linear-gradient(180deg, #2a231d 0%, #1b1613 100%);
+    border: 1px solid #6b5a48;
     box-shadow:
-      inset 0 1px 0 rgba(231, 223, 211, 0.08),
-      inset 0 0 24px rgba(10, 8, 6, 0.75),
-      0 10px 25px -5px rgba(0, 0, 0, 0.8);
+      inset 0 1px 0 rgba(243, 210, 102, 0.14),
+      inset 0 0 28px rgba(8, 6, 4, 0.8),
+      0 14px 30px -6px rgba(0, 0, 0, 0.9);
   }
 
-  /* Recessed Stone / Board Trench */
-  .bastion-trench {
+  /* Differentiated Panel Header (lighter warm bronze/wood + gold bottom border) */
+  .bastion-panel-header {
+    background: linear-gradient(180deg, #382e25 0%, #261f19 100%);
+    border-bottom: 2px solid rgba(197, 155, 39, 0.55);
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.5);
+  }
+
+  /* Carved Board Zone Trench with subtle slot grid pattern */
+  .zone-trench-grid {
+    background-image:
+      repeating-linear-gradient(
+        90deg,
+        rgba(231, 223, 211, 0.025) 0px,
+        rgba(231, 223, 211, 0.025) 1px,
+        transparent 1px,
+        transparent 116px
+      ),
+      repeating-linear-gradient(
+        0deg,
+        rgba(0, 0, 0, 0.18) 0px,
+        rgba(0, 0, 0, 0.18) 1px,
+        transparent 1px,
+        transparent 24px
+      );
     box-shadow:
-      inset 0 3px 12px rgba(0, 0, 0, 0.85),
-      inset 0 0 1px rgba(197, 155, 39, 0.2);
+      inset 0 4px 20px rgba(0, 0, 0, 0.78),
+      inset 0 0 2px rgba(197, 155, 39, 0.25);
   }
 
   /* Primary Gwent/Thronebreaker Gold Metallic Action Button */
   .btn-war-gold {
     font-family: 'Cinzel', Georgia, serif;
     font-weight: 800;
-    letter-spacing: 0.05em;
-    background: linear-gradient(180deg, #d8b13a 0%, #b38820 55%, #825e10 100%);
+    letter-spacing: 0.04em;
+    background: linear-gradient(180deg, #ebd068 0%, #c59b27 50%, #876312 100%);
     color: #14100c;
-    border: 1px solid #6b4c0b;
-    border-top: 1px solid rgba(254, 240, 138, 0.65);
+    border: 1px solid #f5e08e;
+    border-top: 1px solid #fff6c2;
     box-shadow:
-      0 4px 12px rgba(0, 0, 0, 0.65),
-      inset 0 1px 1px rgba(255, 255, 255, 0.35);
+      0 5px 14px rgba(0, 0, 0, 0.75),
+      inset 0 1px 1px rgba(255, 255, 255, 0.5);
     transition: all 150ms ease;
   }
   .btn-war-gold:hover:not(:disabled) {
-    background: linear-gradient(180deg, #e5c14d 0%, #c59b27 55%, #966e15 100%);
+    background: linear-gradient(180deg, #f5de82 0%, #d6ab33 50%, #9c7316 100%);
     box-shadow:
-      0 0 16px rgba(197, 155, 39, 0.45),
-      inset 0 1px 2px rgba(255, 255, 255, 0.45);
+      0 0 18px rgba(227, 193, 88, 0.55),
+      0 6px 16px rgba(0, 0, 0, 0.8),
+      inset 0 1px 2px rgba(255, 255, 255, 0.6);
   }
   .btn-war-gold:active:not(:disabled) {
     transform: translateY(2px);
@@ -69,17 +93,17 @@
   .btn-war-iron {
     font-family: 'Cinzel', Georgia, serif;
     font-weight: 700;
-    background: linear-gradient(180deg, #352e28 0%, #241f1b 100%);
+    background: linear-gradient(180deg, #3b332b 0%, #241f1a 100%);
     color: #e7dfd3;
-    border: 1px solid #574c3f;
-    border-top: 1px solid rgba(231, 223, 211, 0.22);
-    box-shadow: 0 3px 8px rgba(0, 0, 0, 0.6);
+    border: 1px solid #6b5b4b;
+    border-top: 1px solid rgba(243, 210, 102, 0.3);
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.7);
     transition: all 150ms ease;
   }
   .btn-war-iron:hover:not(:disabled) {
-    border-color: #c59b27;
-    color: #f5e6c8;
-    background: linear-gradient(180deg, #403730 0%, #2b2520 100%);
+    border-color: #d4af37;
+    color: #fff6db;
+    background: linear-gradient(180deg, #473d34 0%, #2e2721 100%);
   }
   .btn-war-iron:active:not(:disabled) {
     transform: translateY(2px);
