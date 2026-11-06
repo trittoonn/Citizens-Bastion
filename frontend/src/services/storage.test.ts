@@ -7,8 +7,14 @@ import {
   saveDeck,
   validateDeckLocal,
   generateCardDescription,
+  exportCardToCode,
+  exportCardsToCode,
+  exportDeckToCode,
+  exportCollectionToCode,
+  importShareCode,
+  resetCollectionToDefaults,
 } from './storage';
-import { CardDefinition } from '../types/game';
+import { CardDefinition, DeckPreset } from '../types/game';
 
 describe('localStorage Card & Deck Studio Service', () => {
   beforeEach(() => {
@@ -83,5 +89,94 @@ describe('localStorage Card & Deck Studio Service', () => {
       cards: tinyDeck,
     });
     expect(updatedDecks.some((d) => d.id === 'custom_deck_1')).toBe(true);
+  });
+
+  it('exports and imports cards, decks, and collections with extend and overwrite modes', () => {
+    const cardA: CardDefinition = {
+      id: 'custom_paladin',
+      name: 'Paladín del Alba',
+      type: 'citizen',
+      vitality: 7,
+      description: 'Al jugar: Otorga +2V a un ciudadano propio.',
+      abilities: [
+        {
+          trigger: 'on_play',
+          steps: [
+            {
+              op: 'modify_stat',
+              amount: 2,
+              target: { requirement: 'single_card', owner: 'self' },
+            },
+          ],
+        },
+      ],
+    };
+
+    const cardB: CardDefinition = {
+      id: 'custom_ catapulta',
+      name: 'Catapulta de Asedio',
+      type: 'citizen',
+      vitality: 5,
+      description: 'Al final del turno: Hace 3 de daño a un ciudadano enemigo.',
+    };
+
+    const codeA = exportCardToCode(cardA);
+    expect(codeA.startsWith('CB1-CARD:')).toBe(true);
+
+    const multiCode = exportCardsToCode([cardA, cardB]);
+
+    // 1. Extend collection: adds cardA and cardB to the 10 canonical cards -> 12 cards
+    const extendRes = importShareCode(multiCode, 'extend');
+    expect(extendRes.addedCards).toBe(2);
+    expect(extendRes.skippedCards).toBe(0);
+    expect(extendRes.totalCards).toBe(12);
+    expect(getAllCards().some((c) => c.id === 'custom_paladin')).toBe(true);
+
+    // Pasting again in 'extend' mode skips existing cards
+    const extendAgain = importShareCode(codeA, 'extend');
+    expect(extendAgain.addedCards).toBe(0);
+    expect(extendAgain.skippedCards).toBe(1);
+    expect(extendAgain.totalCards).toBe(12);
+
+    // 2. Overwrite collection: deletes previous 12 cards and keeps ONLY the newly pasted cards (cardA & cardB)
+    const overwriteRes = importShareCode(multiCode, 'overwrite');
+    expect(overwriteRes.addedCards).toBe(2);
+    expect(overwriteRes.totalCards).toBe(2);
+    expect(getAllCards().map((c) => c.id)).toEqual([
+      'custom_paladin',
+      'custom_ catapulta',
+    ]);
+
+    // 3. Export & Import a full Deck onto another client (reconstructs both deck and custom cards)
+    const customDeck: DeckPreset = {
+      id: 'deck_paladines',
+      name: 'Orden del Alba',
+      description: 'Mazo de paladines y catapultas',
+      cards: [cardA, cardA, cardB],
+    };
+    const deckCode = exportDeckToCode(customDeck);
+    expect(deckCode.startsWith('CB1-DECK:')).toBe(true);
+
+    // Simulate another browser client with default storage
+    resetCollectionToDefaults();
+    expect(getAllCards().length).toBe(10);
+
+    const deckImportRes = importShareCode(deckCode, 'extend');
+    expect(deckImportRes.addedCards).toBe(2);
+    expect(deckImportRes.importedDecks).toBe(1);
+    expect(getAllCards().length).toBe(12);
+    const reconstructedDeck = getAllDecks().find((d) => d.name === 'Orden del Alba');
+    expect(reconstructedDeck).toBeDefined();
+    expect(reconstructedDeck?.cards.length).toBe(3);
+    expect(reconstructedDeck?.cards[0].abilities?.[0].steps[0].amount).toBe(2);
+
+    // 4. Full Collection export & overwrite import
+    const collCode = exportCollectionToCode(getAllCards(), getAllDecks());
+    expect(collCode.startsWith('CB1-COLL:')).toBe(true);
+
+    localStorage.clear();
+    const collImport = importShareCode(collCode, 'overwrite');
+    expect(collImport.totalCards).toBe(12);
+    expect(collImport.importedDecks).toBeGreaterThanOrEqual(3);
   });
 });

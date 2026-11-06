@@ -1,20 +1,35 @@
 import React, { useMemo, useState } from 'react';
 import {
   AlertTriangle,
+  Check,
   CheckCircle2,
+  Copy,
+  Download,
+  FileCode2,
   Layers,
   Plus,
+  RotateCcw,
   Settings2,
   Sparkles,
   Trash2,
+  Upload,
+  X,
 } from 'lucide-react';
 import { CardDefinition, DeckConstraints, DeckPreset } from '../types/game';
 import {
   deleteCustomCard,
   deleteDeck,
+  exportCardToCode,
+  exportCardsToCode,
+  exportCollectionToCode,
+  exportDeckToCode,
   getAllCards,
   getAllDecks,
   getDeckConstraints,
+  ImportCollectionMode,
+  importShareCode,
+  parseShareCode,
+  resetCollectionToDefaults,
   saveCustomCard,
   saveDeck,
   saveDeckConstraints,
@@ -36,6 +51,35 @@ export const DeckBuilderView: React.FC = () => {
   const [showConstraintsPanel, setShowConstraintsPanel] = useState(false);
   const [showCardModal, setShowCardModal] = useState(false);
   const [filterType, setFilterType] = useState<'all' | 'citizen' | 'event' | 'custom'>('all');
+
+  // Share Code (Export / Import) Studio State
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [shareTab, setShareTab] = useState<'import' | 'export'>('import');
+  const [exportScope, setExportScope] = useState<
+    'collection' | 'all_cards' | 'custom_cards' | 'active_deck' | 'single_card'
+  >('collection');
+  const [exportSingleCardId, setExportSingleCardId] = useState<string>(
+    () => getAllCards()[0]?.id || ''
+  );
+  const [importText, setImportText] = useState('');
+  const [importMode, setImportMode] = useState<ImportCollectionMode>('extend');
+  const [shareFeedback, setShareFeedback] = useState<{
+    type: 'success' | 'error';
+    message: string;
+  } | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const copyToClipboard = async (text: string, tag: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // Fallback if clipboard API is restricted
+    }
+    setCopiedId(tag);
+    setTimeout(() => {
+      setCopiedId((prev) => (prev === tag ? null : prev));
+    }, 1800);
+  };
 
   const activeDeck = useMemo(
     () => decks.find((d) => d.id === selectedDeckId) || decks[0],
@@ -144,6 +188,90 @@ export const DeckBuilderView: React.FC = () => {
     saveDeckConstraints(next);
   };
 
+  // Generated Export Code for the Export tab
+  const generatedExportCode = useMemo(() => {
+    switch (exportScope) {
+      case 'collection':
+        return exportCollectionToCode(cards, decks);
+      case 'all_cards':
+        return exportCardsToCode(cards);
+      case 'custom_cards': {
+        const customOnly = cards.filter((c) => c.isCustom);
+        return customOnly.length > 0
+          ? exportCardsToCode(customOnly)
+          : '// No tenés cartas forjadas (custom) todavía.';
+      }
+      case 'active_deck':
+        return activeDeck ? exportDeckToCode(activeDeck) : '';
+      case 'single_card': {
+        const target = cards.find((c) => c.id === exportSingleCardId) || cards[0];
+        return target ? exportCardToCode(target) : '';
+      }
+    }
+  }, [exportScope, cards, decks, activeDeck, exportSingleCardId]);
+
+  // Live preview of pasted import code
+  const importPreview = useMemo(() => {
+    if (!importText.trim()) return null;
+    try {
+      const parsed = parseShareCode(importText);
+      return { ok: true as const, parsed };
+    } catch (err: any) {
+      return {
+        ok: false as const,
+        error: err.message || 'Código inválido',
+      };
+    }
+  }, [importText]);
+
+  const handleExecuteImport = () => {
+    setShareFeedback(null);
+    try {
+      const res = importShareCode(importText, importMode);
+      setCards(res.cards);
+      setDecks(res.decks);
+      if (res.activeDeckId) {
+        setSelectedDeckId(res.activeDeckId);
+      } else if (res.decks.length > 0) {
+        setSelectedDeckId(res.decks[0].id);
+      }
+
+      const modeLabel =
+        res.mode === 'overwrite'
+          ? 'Sobreescribir Colección'
+          : 'Extender Colección';
+      const deckMsg =
+        res.importedDecks > 0 ? ` y ${res.importedDecks} mazo(s)` : '';
+      const skippedMsg =
+        res.skippedCards > 0
+          ? ` (${res.skippedCards} ya existían y se conservaron)`
+          : '';
+
+      setShareFeedback({
+        type: 'success',
+        message: `¡Importación exitosa (${modeLabel})! Se cargaron ${res.addedCards} carta(s)${deckMsg}${skippedMsg}. Total en colección: ${res.totalCards} cartas.`,
+      });
+      setImportText('');
+    } catch (err: any) {
+      setShareFeedback({
+        type: 'error',
+        message: err.message || 'No se pudo importar el código.',
+      });
+    }
+  };
+
+  const handleResetToDefaults = () => {
+    const res = resetCollectionToDefaults();
+    setCards(res.cards);
+    setDecks(res.decks);
+    setSelectedDeckId(res.decks[0]?.id || '');
+    setShareFeedback({
+      type: 'success',
+      message:
+        'Se restauró la colección original del Bastión (10 cartas canónicas y 2 mazos base).',
+    });
+  };
+
   return (
     <div className="max-w-7xl mx-auto px-4 py-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
       {/* Left 8 Columns: Card Collection & Forge */}
@@ -159,13 +287,27 @@ export const DeckBuilderView: React.FC = () => {
             </p>
           </div>
 
-          <button
-            onClick={() => setShowCardModal(true)}
-            className="btn-war-gold px-4 py-2.5 rounded text-xs flex items-center gap-1.5"
-          >
-            <Sparkles className="w-4 h-4" />
-            Forjar Nueva Carta
-          </button>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={() => {
+                setShareFeedback(null);
+                setShareTab('import');
+                setShowShareModal(true);
+              }}
+              className="btn-war-iron px-3.5 py-2.5 rounded text-xs flex items-center gap-1.5 border-[#c59b27]/70 text-[#f3d46b]"
+            >
+              <FileCode2 className="w-4 h-4 text-[#f3d46b]" />
+              Importar / Exportar Códigos
+            </button>
+
+            <button
+              onClick={() => setShowCardModal(true)}
+              className="btn-war-gold px-4 py-2.5 rounded text-xs flex items-center gap-1.5"
+            >
+              <Sparkles className="w-4 h-4" />
+              Forjar Nueva Carta
+            </button>
+          </div>
         </div>
 
         {/* Filter Tabs */}
@@ -202,16 +344,38 @@ export const DeckBuilderView: React.FC = () => {
                   badgeCount={countInDeck}
                   onClick={() => handleAddCardToDeck(card)}
                   footerAction={
-                    <div className="flex items-center justify-between gap-1.5">
+                    <div className="flex items-center justify-between gap-1">
                       <button
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
                           handleAddCardToDeck(card);
                         }}
-                        className="btn-war-iron flex-1 py-1 px-2 rounded-sm text-[10px] text-[#e3c158]"
+                        className="btn-war-iron flex-1 py-1 px-1.5 rounded-sm text-[10px] text-[#e3c158]"
                       >
-                        + Alistar al Mazo
+                        + Alistar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const code = exportCardToCode(card);
+                          copyToClipboard(code, `card_${card.id}`);
+                        }}
+                        title="Copiar código serializado de esta carta al portapapeles"
+                        className="px-1.5 py-1 rounded-sm bg-[#1f1a15] hover:bg-[#2e261d] border border-[#6b5a48] text-[9px] font-display font-bold text-[#d6c7b8] flex items-center gap-0.5"
+                      >
+                        {copiedId === `card_${card.id}` ? (
+                          <>
+                            <Check className="w-3 h-3 text-[#4ade80]" />
+                            <span className="text-[#86efac]">Copiado</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3 h-3 text-[#f3d46b]" />
+                            <span>Código</span>
+                          </>
+                        )}
                       </button>
                       {card.isCustom && (
                         <button
@@ -243,6 +407,29 @@ export const DeckBuilderView: React.FC = () => {
               Códice de Mazo
             </h3>
             <div className="flex items-center gap-1.5">
+              {activeDeck && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const code = exportDeckToCode(activeDeck);
+                    copyToClipboard(code, 'active_deck_quick');
+                  }}
+                  title="Copiar código serializado de este mazo (incluye sus cartas)"
+                  className="btn-war-iron px-2 py-1 rounded text-[10px] flex items-center gap-1"
+                >
+                  {copiedId === 'active_deck_quick' ? (
+                    <>
+                      <Check className="w-3 h-3 text-[#4ade80]" />
+                      <span className="text-[#86efac]">Copiado</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3 h-3 text-[#f3d46b]" />
+                      <span>Código Mazo</span>
+                    </>
+                  )}
+                </button>
+              )}
               <button
                 onClick={() => setShowConstraintsPanel((v) => !v)}
                 title="Configurar restricciones opcionales de mazo"
@@ -491,6 +678,333 @@ export const DeckBuilderView: React.FC = () => {
           onClose={() => setShowCardModal(false)}
           onSave={handleSaveNewCard}
         />
+      )}
+
+      {/* =====================================================================
+          SHARE CODE STUDIO MODAL (EXPORT & IMPORT CARDS, DECKS & COLLECTIONS)
+         ===================================================================== */}
+      {showShareModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0d0b09]/85 backdrop-blur-sm p-4">
+          <div className="bastion-panel rounded-lg max-w-3xl w-full overflow-hidden border-2 border-[#c59b27] shadow-[0_24px_60px_rgba(0,0,0,0.95)] flex flex-col max-h-[90vh]">
+            {/* Modal Header */}
+            <div className="bastion-panel-header px-6 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <FileCode2 className="w-5 h-5 text-[#f3d46b]" />
+                <div>
+                  <h3 className="font-display text-base font-bold text-[#f3ead8]">
+                    Códice de Intercambio — Importar y Exportar por Texto
+                  </h3>
+                  <p className="font-serif text-xs text-[#a89b8c]">
+                    Compartí cartas individuales, mazos completos o colecciones enteras con códigos autónomos.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowShareModal(false)}
+                className="p-1.5 rounded bg-[#14110e] hover:bg-[#2b2216] border border-[#574c3f] text-[#d6c7b8]"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Mode Tabs: Importar vs Exportar */}
+            <div className="px-6 pt-4 flex items-center justify-between gap-2 border-b border-[#463c32] pb-3 bg-[#16120f]">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShareTab('import');
+                    setShareFeedback(null);
+                  }}
+                  className={`px-4 py-2 rounded text-xs font-display font-bold flex items-center gap-1.5 transition ${
+                    shareTab === 'import' ? 'btn-war-gold' : 'btn-war-iron'
+                  }`}
+                >
+                  <Download className="w-4 h-4" />
+                  Importar Códigos
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShareTab('export');
+                    setShareFeedback(null);
+                  }}
+                  className={`px-4 py-2 rounded text-xs font-display font-bold flex items-center gap-1.5 transition ${
+                    shareTab === 'export' ? 'btn-war-gold' : 'btn-war-iron'
+                  }`}
+                >
+                  <Upload className="w-4 h-4" />
+                  Exportar a Texto
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleResetToDefaults}
+                title="Restaurar las 10 cartas canónicas y los 2 mazos base"
+                className="btn-war-iron px-3 py-1.5 rounded text-[10px] flex items-center gap-1 text-[#d6c7b8]"
+              >
+                <RotateCcw className="w-3.5 h-3.5 text-[#f3d46b]" />
+                Restaurar Base Original
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 overflow-y-auto space-y-5 flex-1">
+              {shareFeedback && (
+                <div
+                  className={`p-3.5 rounded border font-serif text-sm flex items-center justify-between gap-3 ${
+                    shareFeedback.type === 'success'
+                      ? 'bg-[#14291a] border-[#2e6f40] text-[#bbf7d0]'
+                      : 'bg-[#3b1614] border-[#8c2222] text-[#fecaca]'
+                  }`}
+                >
+                  <span>{shareFeedback.message}</span>
+                  <button
+                    type="button"
+                    onClick={() => setShareFeedback(null)}
+                    className="text-xs underline shrink-0"
+                  >
+                    Cerrar
+                  </button>
+                </div>
+              )}
+
+              {shareTab === 'import' ? (
+                <div className="space-y-4">
+                  {/* Collection Mode Selector: Extender vs Sobreescribir */}
+                  <div className="space-y-2">
+                    <label className="block font-display text-xs font-bold uppercase tracking-wider text-[#f3d46b]">
+                      1. Modo de Importación en tu Colección
+                    </label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setImportMode('extend')}
+                        className={`text-left p-3 rounded border transition ${
+                          importMode === 'extend'
+                            ? 'bg-[#2b2216] border-[#c59b27] text-[#f3ead8] shadow-[inset_0_0_16px_rgba(197,155,39,0.25)]'
+                            : 'bg-[#14110e] border-[#3a322a] text-[#a89b8c] hover:border-[#6b5a48]'
+                        }`}
+                      >
+                        <div className="font-display text-xs font-bold text-[#f3d46b]">
+                          ➕ Extender Colección
+                        </div>
+                        <p className="font-serif text-xs text-[#d6c7b8] mt-1 leading-snug">
+                          Conserva tus cartas actuales y agrega todas las cartas pegadas que aún no existan en tu colección.
+                        </p>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setImportMode('overwrite')}
+                        className={`text-left p-3 rounded border transition ${
+                          importMode === 'overwrite'
+                            ? 'bg-[#361915] border-[#f87171] text-[#f3ead8] shadow-[inset_0_0_16px_rgba(239,68,68,0.25)]'
+                            : 'bg-[#14110e] border-[#3a322a] text-[#a89b8c] hover:border-[#6b5a48]'
+                        }`}
+                      >
+                        <div className="font-display text-xs font-bold text-[#fca5a5]">
+                          🔄 Sobreescribir Colección
+                        </div>
+                        <p className="font-serif text-xs text-[#d6c7b8] mt-1 leading-snug">
+                          Borra las cartas anteriores de tu colección y deja únicamente las nuevas cartas importadas.
+                        </p>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Textarea for pasting codes */}
+                  <div className="space-y-1.5">
+                    <label className="block font-display text-xs font-bold uppercase tracking-wider text-[#f3d46b]">
+                      2. Pegá el Código de Carta(s), Mazo o Colección
+                    </label>
+                    <textarea
+                      rows={5}
+                      value={importText}
+                      onChange={(e) => setImportText(e.target.value)}
+                      placeholder={
+                        'Pegá aquí uno o varios códigos:\nCB1-CARD:...\nCB1-CARD:...\no un código de mazo (CB1-DECK:...) o colección completa (CB1-COLL:...)'
+                      }
+                      className="w-full p-3 rounded bg-[#120f0d] border border-[#574c3f] font-mono text-xs text-[#f3ead8] focus:border-[#c59b27] focus:outline-none shadow-inner"
+                    />
+                  </div>
+
+                  {/* Live Preview of Pasted Content */}
+                  {importPreview && (
+                    <div
+                      className={`p-3 rounded border text-xs ${
+                        importPreview.ok
+                          ? 'bg-[#171310] border-[#6b5a48] text-[#e7dfd3]'
+                          : 'bg-[#2b1412] border-[#8c2222] text-[#fecaca]'
+                      }`}
+                    >
+                      {importPreview.ok ? (
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between font-display font-bold text-[#f3d46b]">
+                            <span>
+                              ✓ Código válido detectado:{' '}
+                              {importPreview.parsed.cards.length} carta(s)
+                              {importPreview.parsed.decks.length > 0
+                                ? ` y ${importPreview.parsed.decks.length} mazo(s)`
+                                : ''}
+                            </span>
+                            <span className="uppercase text-[10px] px-2 py-0.5 rounded bg-[#2b2216] border border-[#c59b27]/50">
+                              {importPreview.parsed.kind}
+                            </span>
+                          </div>
+                          {importPreview.parsed.cards.length > 0 && (
+                            <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto pt-1">
+                              {importPreview.parsed.cards.map((c) => (
+                                <span
+                                  key={c.id}
+                                  className="px-2 py-0.5 rounded bg-[#241e18] border border-[#574c3f] font-serif text-[11px] text-[#f3ead8]"
+                                >
+                                  {c.name}{' '}
+                                  {c.type === 'citizen' ? `(${c.vitality}V)` : '(Efecto)'}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <span>⚠️ {importPreview.error}</span>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="flex justify-end gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowShareModal(false)}
+                      className="btn-war-iron px-4 py-2 rounded text-xs"
+                    >
+                      Cerrar
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!importPreview || !importPreview.ok}
+                      onClick={handleExecuteImport}
+                      className="btn-war-gold px-5 py-2 rounded text-xs flex items-center gap-1.5"
+                    >
+                      <Download className="w-4 h-4" />
+                      {importMode === 'overwrite'
+                        ? 'Sobreescribir e Importar Ahora'
+                        : 'Extender Colección Ahora'}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {/* Scope Selector for Export */}
+                  <div className="space-y-2">
+                    <label className="block font-display text-xs font-bold uppercase tracking-wider text-[#f3d46b]">
+                      1. ¿Qué deseás exportar a código de texto?
+                    </label>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                      {(
+                        [
+                          {
+                            id: 'collection',
+                            label: `Colección Entera (${cards.length} cartas, ${decks.length} mazos)`,
+                          },
+                          {
+                            id: 'all_cards',
+                            label: `Todas las Cartas (${cards.length} líneas)`,
+                          },
+                          {
+                            id: 'custom_cards',
+                            label: `Solo Cartas Forjadas (${
+                              cards.filter((c) => c.isCustom).length
+                            })`,
+                          },
+                          {
+                            id: 'active_deck',
+                            label: `Mazo Activo (${activeDeck?.name || 'Mazo'})`,
+                          },
+                          {
+                            id: 'single_card',
+                            label: 'Una Carta Específica',
+                          },
+                        ] as const
+                      ).map((opt) => (
+                        <button
+                          type="button"
+                          key={opt.id}
+                          onClick={() => setExportScope(opt.id)}
+                          className={`p-2.5 rounded border text-left font-display text-[11px] font-bold transition ${
+                            exportScope === opt.id
+                              ? 'bg-[#2b2216] border-[#c59b27] text-[#fef08a] shadow-[inset_0_0_12px_rgba(197,155,39,0.25)]'
+                              : 'bg-[#14110e] border-[#3a322a] text-[#a89b8c] hover:border-[#6b5a48]'
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {exportScope === 'single_card' && (
+                    <div>
+                      <label className="block font-display text-xs font-bold text-[#d6c7b8] mb-1">
+                        Seleccioná la carta a serializar:
+                      </label>
+                      <select
+                        value={exportSingleCardId}
+                        onChange={(e) => setExportSingleCardId(e.target.value)}
+                        className="w-full px-3 py-2 rounded bg-[#14110e] border border-[#574c3f] font-display text-xs font-bold text-[#f3d46b]"
+                      >
+                        {cards.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name} ({c.type === 'citizen' ? `${c.vitality}V` : 'Evento'})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className="font-display text-xs font-bold uppercase tracking-wider text-[#f3d46b]">
+                        2. Código de Texto Serializado
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          copyToClipboard(generatedExportCode, 'modal_export')
+                        }
+                        className="btn-war-gold px-3.5 py-1 rounded text-xs flex items-center gap-1.5"
+                      >
+                        {copiedId === 'modal_export' ? (
+                          <>
+                            <Check className="w-3.5 h-3.5" />
+                            ¡Código Copiado!
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3.5 h-3.5" />
+                            Copiar Código
+                          </>
+                        )}
+                      </button>
+                    </div>
+                    <textarea
+                      readOnly
+                      rows={6}
+                      value={generatedExportCode}
+                      onFocus={(e) => e.currentTarget.select()}
+                      className="w-full p-3 rounded bg-[#120f0d] border border-[#574c3f] font-mono text-xs text-[#fde68a] focus:border-[#c59b27] focus:outline-none shadow-inner"
+                    />
+                    <p className="font-serif text-xs text-[#a89b8c]">
+                      Este código contiene toda la definición de las cartas (estadísticas, habilidades, triggers e iconos) para que cualquier otro jugador pueda reconstruirlas pegando el texto.
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
