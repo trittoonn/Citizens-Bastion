@@ -188,6 +188,7 @@ type createLobbyRequest struct {
 	PlayerID     string                `json:"playerId"`
 	PlayerName   string                `json:"playerName"`
 	Deck         []game.CardDefinition `json:"deck"`
+	AIDeck       []game.CardDefinition `json:"aiDeck,omitempty"`
 	Rules        game.GameRulesConfig  `json:"rules"`
 	VsAI         bool                  `json:"vsAi"`
 	AIDifficulty game.AIDifficulty     `json:"aiDifficulty"`
@@ -212,7 +213,7 @@ func (s *Server) handleLobbies(w http.ResponseWriter, r *http.Request) {
 		if req.VsAI && diff == "" {
 			diff = game.AIDifficultyMedium
 		}
-		summary, view, err := s.manager.CreateLobby(req.GameName, req.PlayerID, req.PlayerName, req.Deck, req.Rules, diff)
+		summary, view, err := s.manager.CreateLobbyWithAIDeck(req.GameName, req.PlayerID, req.PlayerName, req.Deck, req.Rules, diff, req.AIDeck)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return

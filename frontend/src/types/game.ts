@@ -129,6 +129,7 @@ export interface CardInstance {
   currentVitality: number;
   zone: ZoneID;
   playedThisTurn: boolean;
+  movedThisTurn?: boolean;
   attackedThisTurn: boolean;
 }
 

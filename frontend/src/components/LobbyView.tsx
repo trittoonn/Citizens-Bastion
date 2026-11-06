@@ -70,6 +70,10 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
   const [selectedDeckId, setSelectedDeckId] = useState<string>(
     () => getAllDecks()[0]?.id || ''
   );
+  const [selectedAiDeckId, setSelectedAiDeckId] = useState<string>(() => {
+    const all = getAllDecks();
+    return all[1]?.id || all[0]?.id || '__auto__';
+  });
 
   const [gameName, setGameName] = useState('');
   const [vsAi, setVsAi] = useState(false);
@@ -132,11 +136,25 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
         },
       };
 
+      let resolvedAiDeck = undefined;
+      if (vsAi) {
+        if (selectedAiDeckId === '__random__' && decks.length > 0) {
+          const randIdx = Math.floor(Math.random() * decks.length);
+          resolvedAiDeck = decks[randIdx].cards;
+        } else if (selectedAiDeckId !== '__auto__') {
+          const foundAiDeck = decks.find((d) => d.id === selectedAiDeckId);
+          if (foundAiDeck && foundAiDeck.cards.length > 0) {
+            resolvedAiDeck = foundAiDeck.cards;
+          }
+        }
+      }
+
       const res = await createLobby({
         gameName: effectiveGameName,
         playerId: session.playerId,
         playerName: session.playerName.trim() || 'Comandante',
         deck: selectedDeck.cards,
+        aiDeck: resolvedAiDeck,
         rules,
         vsAi,
         aiDifficulty: vsAi ? aiDifficulty : '',
@@ -282,6 +300,51 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                   Contra la IA
                 </button>
               </div>
+            </div>
+
+            {/* Deck Selection for Player (and AI when vsAi is active) */}
+            <div className="p-3.5 rounded bg-[#16120f] border border-[#574c3f] space-y-3">
+              <div>
+                <label className="block font-display text-xs font-bold text-[#f3d46b] mb-1">
+                  Tu Mazo para la Partida
+                </label>
+                <select
+                  value={selectedDeck?.id || ''}
+                  onChange={(e) => setSelectedDeckId(e.target.value)}
+                  className="w-full px-3 py-2 rounded bg-[#120f0d] border border-[#6b5a48] font-display text-xs font-bold text-[#f3ead8] focus:border-[#c59b27] focus:outline-none shadow-inner"
+                >
+                  {decks.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.name} ({d.cards.length} cartas)
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {vsAi && (
+                <div className="pt-2.5 border-t border-[#3a322a]">
+                  <label className="block font-display text-xs font-bold text-[#fca5a5] mb-1">
+                    Mazo que jugará la IA
+                  </label>
+                  <select
+                    value={selectedAiDeckId}
+                    onChange={(e) => setSelectedAiDeckId(e.target.value)}
+                    className="w-full px-3 py-2 rounded bg-[#120f0d] border border-[#8c3b3b] font-display text-xs font-bold text-[#fecaca] focus:border-[#f87171] focus:outline-none shadow-inner"
+                  >
+                    {decks.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.name} ({d.cards.length} cartas)
+                      </option>
+                    ))}
+                    <option value="__random__">
+                      🎲 Mazo Aleatorio (entre tus mazos)
+                    </option>
+                    <option value="__auto__">
+                      ⚙️ Automático según Dificultad de la IA
+                    </option>
+                  </select>
+                </div>
+              )}
             </div>
 
             {/* AI Difficulty & Starting Player Picker */}

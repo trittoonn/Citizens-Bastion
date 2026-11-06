@@ -207,7 +207,7 @@ export const App: React.FC = () => {
                 <strong className="font-display text-xs text-[#e3c158]">Zonas del Tablero (por jugador):</strong>
                 <br />• <em>La Ciudad</em>, <em>El Camino</em> y <em>La Zona de Combate</em>.
                 <br />• Podés jugar Ciudadanos en La Ciudad o El Camino. Solo podés jugar una carta directo en la Zona de Combate si tu oponente tiene una carta ahí.
-                <br />• Podés mover 1 Ciudadano por turno a una zona inmediatamente adyacente (Ciudad ↔ Camino ↔ Combate) siempre que no haya sido jugado ese mismo turno.
+                <br />• Podés mover tus Ciudadanos a una zona inmediatamente adyacente (Ciudad ↔ Camino ↔ Combate) siempre que no hayan sido jugados ese mismo turno.
               </p>
               <p>
                 <strong className="font-display text-xs text-[#e3c158]">Combate:</strong> Cada Ciudadano en la Zona de Combate puede atacar una vez por turno a cualquier carta enemiga que no tenga otra carta en una zona de por medio (primero Zona de Combate; si está vacía, El Camino; si está vacío, La Ciudad).

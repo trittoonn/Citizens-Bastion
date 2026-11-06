@@ -490,9 +490,9 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
     if (
       view.phase !== 'MAIN' ||
       !view.isYourTurn ||
-      view.movesRemaining <= 0 ||
       !selectedBoardCard ||
-      selectedBoardCard.playedThisTurn
+      selectedBoardCard.playedThisTurn ||
+      selectedBoardCard.movedThisTurn
     ) {
       return false;
     }
@@ -1048,7 +1048,8 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
                               !isAnimatingMultiStep &&
                               view.phase === 'MAIN' &&
                               view.isYourTurn &&
-                              view.movesRemaining > 0
+                              !inst.playedThisTurn &&
+                              !inst.movedThisTurn
                             }
                             onMouseEnter={() =>
                               setHoveredCard({ card: inst.definition, instance: inst })
@@ -1249,7 +1250,7 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
                     {view.playsRemaining}
                   </strong>
                   <br />
-                  Marchas disp.:{' '}
+                  Unidades para marchar:{' '}
                   <strong className="font-display text-[#f3d46b]">
                     {view.movesRemaining}
                   </strong>
@@ -1312,7 +1313,7 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
                       : 'bg-[#1a1613] border-[#3a322a] text-[#6e6053]'
                   }`}
                 >
-                  {view.movesRemaining} disp.
+                  {view.movesRemaining} listos
                 </span>
               </div>
 
@@ -1392,7 +1393,7 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
                 <ul className="px-2.5 pb-2.5 pt-1 border-t border-[#3a322a] space-y-1 font-serif text-[11px] text-[#d6c7b8] leading-snug">
                   <li>• <strong>Victoria:</strong> +1 Pto de Desarrollo al cerrar tu turno con más Ciudadanos (Meta: {view.rules.pointsToWin}).</li>
                   <li>• <strong>Despliegue:</strong> En <em>Ciudad</em> o <em>Camino</em> (en <em>Combate</em> solo si el rival la ocupa).</li>
-                  <li>• <strong>Marcha:</strong> 1 Ciudadano (no jugado este turno) a fila adyacente.</li>
+                  <li>• <strong>Marcha:</strong> Cualquier Ciudadano (no jugado este turno) puede moverse a una fila adyacente.</li>
                   <li>• <strong>Combate:</strong> Cada unidad en <em>Combate</em> ataca 1 vez a la fila enemiga más cercana.</li>
                 </ul>
               )}

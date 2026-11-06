@@ -194,6 +194,7 @@ func (g *GameState) drawCards(p *PlayerState, count int) int {
 		p.Deck = p.Deck[1:]
 		top.Zone = ZoneHand
 		top.PlayedThisTurn = false
+		top.MovedThisTurn = false
 		top.AttackedThisTurn = false
 		p.Hand = append(p.Hand, top)
 		drawn++
@@ -284,10 +285,13 @@ func (g *GameState) beginTurn(playerIdx int) {
 	active := g.Players[playerIdx]
 
 	// Reset per-turn card flags across board
+	movableCount := 0
 	for _, z := range []ZoneID{ZoneCity, ZoneRoad, ZoneCombat} {
 		for _, c := range active.Board[z] {
 			c.PlayedThisTurn = false
+			c.MovedThisTurn = false
 			c.AttackedThisTurn = false
+			movableCount++
 		}
 	}
 
@@ -296,7 +300,7 @@ func (g *GameState) beginTurn(playerIdx int) {
 	} else {
 		g.PlaysRemaining = g.Rules.MaxPlaysPerTurn
 	}
-	g.MovesRemaining = g.Rules.MaxMovesPerTurn
+	g.MovesRemaining = movableCount
 
 	g.Phase = PhaseStartOfTurn
 	g.ResumePhase = PhaseMain
@@ -497,7 +501,24 @@ func (g *GameState) PlayCard(playerID, cardInstanceID string, targetZone ZoneID)
 	return nil
 }
 
-// MoveCitizen moves a Citizen that was not played this turn to an immediately adjacent zone.
+// countMovableCitizens returns how many Citizens on p's board can still move this turn.
+func (g *GameState) countMovableCitizens(p *PlayerState) int {
+	if p == nil {
+		return 0
+	}
+	count := 0
+	for _, z := range []ZoneID{ZoneCity, ZoneRoad, ZoneCombat} {
+		for _, c := range p.Board[z] {
+			if !c.PlayedThisTurn && !c.MovedThisTurn {
+				count++
+			}
+		}
+	}
+	return count
+}
+
+// MoveCitizen moves a Citizen that was not played this turn (and has not moved yet this turn)
+// to an immediately adjacent zone. Any number of eligible Citizens may move per turn.
 func (g *GameState) MoveCitizen(playerID, cardInstanceID string, toZone ZoneID) error {
 	if g.Phase != PhaseMain {
 		return fmt.Errorf("solo podés mover Ciudadanos en la Fase Principal")
@@ -508,9 +529,6 @@ func (g *GameState) MoveCitizen(playerID, cardInstanceID string, toZone ZoneID) 
 	}
 	if idx != g.ActivePlayerIdx {
 		return fmt.Errorf("no es tu turno")
-	}
-	if g.MovesRemaining <= 0 {
-		return fmt.Errorf("ya utilizaste tu movimiento de este turno")
 	}
 	if !IsBoardZone(toZone) {
 		return fmt.Errorf("zona de destino inválida")
@@ -523,6 +541,9 @@ func (g *GameState) MoveCitizen(playerID, cardInstanceID string, toZone ZoneID) 
 	if card.PlayedThisTurn {
 		return fmt.Errorf("no podés mover a %s porque fue jugado en este turno", card.Definition.Name)
 	}
+	if card.MovedThisTurn {
+		return fmt.Errorf("%s ya se movió en este turno", card.Definition.Name)
+	}
 	if !AreZonesAdjacent(fromZone, toZone) {
 		return fmt.Errorf("solo podés mover un Ciudadano a una zona inmediatamente adyacente (%s -> %s no es adyacente)", zoneDisplayName(fromZone), zoneDisplayName(toZone))
 	}
@@ -531,8 +552,9 @@ func (g *GameState) MoveCitizen(playerID, cardInstanceID string, toZone ZoneID) 
 	row := p.Board[fromZone]
 	p.Board[fromZone] = append(row[:pos], row[pos+1:]...)
 	card.Zone = toZone
+	card.MovedThisTurn = true
 	p.Board[toZone] = append(p.Board[toZone], card)
-	g.MovesRemaining--
+	g.MovesRemaining = g.countMovableCitizens(p)
 
 	g.addLog(fmt.Sprintf("%s movió a %s de %s a %s.", p.Name, card.Definition.Name, zoneDisplayName(fromZone), zoneDisplayName(toZone)))
 	g.recordAnimStep(ActionAnimationEvent{
@@ -1186,6 +1208,7 @@ func (g *GameState) moveCardToZone(p *PlayerState, instanceID string, dest ZoneI
 	card.Zone = dest
 	card.CurrentVitality = card.BaseVitality
 	card.PlayedThisTurn = false
+	card.MovedThisTurn = false
 	card.AttackedThisTurn = false
 
 	switch dest {
@@ -1312,7 +1335,7 @@ func (g *GameState) BuildPlayerView(playerID string) (*PlayerGameView, error) {
 		ActivePlayerID:      activeID,
 		IsYourTurn:          activeID == playerID && g.Phase != PhaseWaitingForPlayers && g.Phase != PhaseGameOver,
 		PlaysRemaining:      g.PlaysRemaining,
-		MovesRemaining:      g.MovesRemaining,
+		MovesRemaining:      g.countMovableCitizens(you),
 		CanPlayInCombatZone: g.CanPlayInCombat(playerID),
 		ValidCombatTargets:  g.ValidCombatTargetIDs(playerID),
 		PendingPrompt:       promptCopy,

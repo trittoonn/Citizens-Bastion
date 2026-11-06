@@ -106,10 +106,14 @@ func TestZonePlacementAndAdjacencyMovement(t *testing.T) {
 		t.Fatalf("expected error playing in ZoneCombat when opponent Combat Zone is empty")
 	}
 
-	// Play in City
+	// Play two cards in City on Turn 1
 	c1 := p1.Hand[0].InstanceID
+	c1b := p1.Hand[1].InstanceID
 	if err := gs.PlayCard("p1", c1, ZoneCity); err != nil {
-		t.Fatalf("PlayCard in City failed: %v", err)
+		t.Fatalf("PlayCard c1 in City failed: %v", err)
+	}
+	if err := gs.PlayCard("p1", c1b, ZoneCity); err != nil {
+		t.Fatalf("PlayCard c1b in City failed: %v", err)
 	}
 
 	// Rule 15 & 26: Cannot move a Citizen played this turn
@@ -123,23 +127,25 @@ func TestZonePlacementAndAdjacencyMovement(t *testing.T) {
 	_ = gs.PlayCard("p2", p2Card, ZoneRoad)
 	_ = gs.EndTurn("p2")
 
-	// Now on Turn 3 (P1's turn), c1 was NOT played this turn.
+	// Now on Turn 3 (P1's turn), c1 and c1b were NOT played this turn.
 	// Cannot move directly from City to Combat (non-adjacent)
 	if err := gs.MoveCitizen("p1", c1, ZoneCombat); err == nil {
 		t.Fatalf("expected error moving directly from City to Combat")
 	}
 
-	// Move from City to Road (valid)
+	// Move c1 from City to Road (valid)
 	if err := gs.MoveCitizen("p1", c1, ZoneRoad); err != nil {
-		t.Fatalf("MoveCitizen City->Road failed: %v", err)
-	}
-	if gs.MovesRemaining != 0 {
-		t.Fatalf("expected 0 MovesRemaining after moving, got %d", gs.MovesRemaining)
+		t.Fatalf("MoveCitizen c1 City->Road failed: %v", err)
 	}
 
-	// Cannot move a second time in the same turn
+	// The SAME card (c1) cannot move a second time in the same turn
 	if err := gs.MoveCitizen("p1", c1, ZoneCombat); err == nil {
-		t.Fatalf("expected error when MovesRemaining == 0")
+		t.Fatalf("expected error moving the same card twice in one turn")
+	}
+
+	// However, a SECOND card (c1b) that was also not played this turn CAN move in the same turn!
+	if err := gs.MoveCitizen("p1", c1b, ZoneRoad); err != nil {
+		t.Fatalf("MoveCitizen c1b City->Road in same turn failed: %v", err)
 	}
 
 	// End P1 turn; P2 moves p2Card from Road to Combat

@@ -105,7 +105,9 @@ export const CardView: React.FC<CardViewProps> = ({
   const isDamaged = Boolean(instance && currentV < baseV);
   const isBuffed = Boolean(instance && currentV > baseV);
   const readyToAttack = Boolean(canAttack && instance && !instance.attackedThisTurn);
-  const readyToMove = Boolean(canMove && instance && !instance.playedThisTurn);
+  const readyToMove = Boolean(
+    canMove && instance && !instance.playedThisTurn && !instance.movedThisTurn
+  );
 
   // High-contrast metallic bevel frames so cards pop sharply off the dark board
   const outerBevel = isCitizen
@@ -277,6 +279,13 @@ export const CardView: React.FC<CardViewProps> = ({
               className="px-1 py-0.2 rounded bg-[#181411]/95 border border-[#8a7968] text-[8px] font-display font-bold text-[#d6c7b8] shadow-md"
             >
               Zzz
+            </span>
+          ) : instance?.movedThisTurn ? (
+            <span
+              title="Ya marchó en este turno"
+              className="px-1 py-0.2 rounded bg-[#181310]/95 border border-[#574c3f] text-[7px] font-semibold text-[#9c8d7e]"
+            >
+              Marchó
             </span>
           ) : readyToMove ? (
             <span

@@ -138,7 +138,7 @@ func (g *GameState) takeAIMainPhaseStep(ai, human *PlayerState, diff AIDifficult
 }
 
 func (g *GameState) tryAIMove(ai, human *PlayerState, diff AIDifficulty) bool {
-	if g.MovesRemaining <= 0 {
+	if g.countMovableCitizens(ai) <= 0 {
 		return false
 	}
 
@@ -150,7 +150,7 @@ func (g *GameState) tryAIMove(ai, human *PlayerState, diff AIDifficulty) bool {
 	// Prefer moving the highest-Vitality Citizen from Road -> Combat so it can attack right away!
 	var roadCandidates []*CardInstance
 	for _, c := range ai.Board[ZoneRoad] {
-		if !c.PlayedThisTurn {
+		if !c.PlayedThisTurn && !c.MovedThisTurn {
 			roadCandidates = append(roadCandidates, c)
 		}
 	}
@@ -158,11 +158,12 @@ func (g *GameState) tryAIMove(ai, human *PlayerState, diff AIDifficulty) bool {
 		sort.Slice(roadCandidates, func(i, j int) bool {
 			return roadCandidates[i].AttackPower(g.Rules.VitalityMode) > roadCandidates[j].AttackPower(g.Rules.VitalityMode)
 		})
-		best := roadCandidates[0]
-		// Hard AI keeps fragile value engines (like Mago de las Tormentas 4V) out of Combat if there are other units
-		if diff != AIDifficultyHard || best.Definition.ID != "mago_de_las_tormentas" || best.CurrentVitality >= 6 {
-			if err := g.MoveCitizen(ai.ID, best.InstanceID, ZoneCombat); err == nil {
-				return true
+		for _, best := range roadCandidates {
+			// Hard AI keeps fragile value engines (like Mago de las Tormentas 4V) out of Combat if there are other units
+			if diff != AIDifficultyHard || best.Definition.ID != "mago_de_las_tormentas" || best.CurrentVitality >= 6 {
+				if err := g.MoveCitizen(ai.ID, best.InstanceID, ZoneCombat); err == nil {
+					return true
+				}
 			}
 		}
 	}
@@ -170,7 +171,7 @@ func (g *GameState) tryAIMove(ai, human *PlayerState, diff AIDifficulty) bool {
 	// Otherwise move a strong Citizen from City -> Road so it can reach Combat next turn
 	var cityCandidates []*CardInstance
 	for _, c := range ai.Board[ZoneCity] {
-		if !c.PlayedThisTurn {
+		if !c.PlayedThisTurn && !c.MovedThisTurn {
 			cityCandidates = append(cityCandidates, c)
 		}
 	}

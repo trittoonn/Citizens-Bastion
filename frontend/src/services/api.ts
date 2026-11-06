@@ -66,6 +66,7 @@ export async function createLobby(params: {
   playerId: string;
   playerName: string;
   deck: CardDefinition[];
+  aiDeck?: CardDefinition[];
   rules: GameRulesConfig;
   vsAi?: boolean;
   aiDifficulty?: AIDifficulty;

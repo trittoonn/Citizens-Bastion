@@ -71,16 +71,20 @@ func NewManager() *Manager {
 // CreateLobby creates a new game lobby and joins the creator as Player 1.
 // If aiDifficulty is non-empty ("easy", "medium", "hard"), an AI opponent is automatically added as Player 2.
 func (m *Manager) CreateLobby(gameName, playerID, playerName string, deck []game.CardDefinition, rules game.GameRulesConfig, aiDifficulty ...game.AIDifficulty) (*LobbySummary, *game.PlayerGameView, error) {
+	var diff game.AIDifficulty
+	if len(aiDifficulty) > 0 {
+		diff = aiDifficulty[0]
+	}
+	return m.CreateLobbyWithAIDeck(gameName, playerID, playerName, deck, rules, diff, nil)
+}
+
+// CreateLobbyWithAIDeck creates a new game lobby and allows specifying the exact deck the AI opponent will use.
+func (m *Manager) CreateLobbyWithAIDeck(gameName, playerID, playerName string, deck []game.CardDefinition, rules game.GameRulesConfig, diff game.AIDifficulty, customAIDeck []game.CardDefinition) (*LobbySummary, *game.PlayerGameView, error) {
 	if gameName == "" {
 		return nil, nil, fmt.Errorf("el nombre de la partida es obligatorio")
 	}
 	if playerID == "" || playerName == "" {
 		return nil, nil, fmt.Errorf("el identificador y nombre del jugador son obligatorios")
-	}
-
-	var diff game.AIDifficulty
-	if len(aiDifficulty) > 0 {
-		diff = aiDifficulty[0]
 	}
 
 	m.mu.Lock()
@@ -93,10 +97,13 @@ func (m *Manager) CreateLobby(gameName, playerID, playerName string, deck []game
 	}
 
 	if diff != game.AIDifficultyNone {
-		defaultDecks := game.DefaultDecks()
-		aiDeck := defaultDecks[0].Cards
-		if diff == game.AIDifficultyHard && len(defaultDecks) > 1 {
-			aiDeck = defaultDecks[1].Cards
+		aiDeck := customAIDeck
+		if len(aiDeck) == 0 {
+			defaultDecks := game.DefaultDecks()
+			aiDeck = defaultDecks[0].Cards
+			if diff == game.AIDifficultyHard && len(defaultDecks) > 1 {
+				aiDeck = defaultDecks[1].Cards
+			}
 		}
 		if err := gs.AddPlayer(game.AIBotID, game.BotDisplayName(diff), aiDeck); err != nil {
 			m.mu.Unlock()

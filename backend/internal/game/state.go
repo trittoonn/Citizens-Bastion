@@ -22,6 +22,7 @@ type CardInstance struct {
 	CurrentVitality  int            `json:"currentVitality"`
 	Zone             ZoneID         `json:"zone"`
 	PlayedThisTurn   bool           `json:"playedThisTurn"`
+	MovedThisTurn    bool           `json:"movedThisTurn"`
 	AttackedThisTurn bool           `json:"attackedThisTurn"`
 }
 
