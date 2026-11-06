@@ -8,13 +8,16 @@ export type ZoneID =
   | 'exile'
   | 'same_row';
 
-export type CardType = 'citizen' | 'event';
+export type CardType = 'citizen' | 'event' | 'tool';
 
 export type TriggerType =
   | 'on_play'
   | 'on_turn_start'
   | 'on_turn_end'
-  | 'immediate';
+  | 'immediate'
+  | 'on_death'
+  | 'on_event_played'
+  | 'on_discard';
 
 export type EffectOpType =
   | 'summon_token'
@@ -22,13 +25,17 @@ export type EffectOpType =
   | 'draw_cards'
   | 'move_zone'
   | 'destroy'
-  | 'modify_stat';
+  | 'modify_stat'
+  | 'discard_cards'
+  | 'summon_self'
+  | 'mill_or_sacrifice';
 
 export type TargetRequirement =
   | 'none'
   | 'single_card'
   | 'all_matching'
-  | 'self_card';
+  | 'self_card'
+  | 'right_neighbor';
 
 export type TargetOwner = 'self' | 'enemy' | 'any';
 
@@ -45,7 +52,11 @@ export interface TokenTemplate {
   name: string;
   vitality: number;
   count?: number;
+  bonusCountIfEnemyMorePoints?: number;
   artIcon?: string;
+  description?: string;
+  hasShield?: boolean;
+  abilities?: Ability[];
 }
 
 export interface EffectStep {
@@ -69,6 +80,9 @@ export interface CardDefinition {
   vitality: number;
   description: string;
   abilities?: Ability[];
+  isSpy?: boolean;
+  hasShield?: boolean;
+  playFromDiscard?: boolean;
   isToken?: boolean;
   isCustom?: boolean;
   artColor?: string;
@@ -131,6 +145,7 @@ export interface CardInstance {
   playedThisTurn: boolean;
   movedThisTurn?: boolean;
   attackedThisTurn: boolean;
+  shieldActive?: boolean;
 }
 
 export interface PendingPrompt {

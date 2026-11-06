@@ -99,19 +99,27 @@ export const CardView: React.FC<CardViewProps> = ({
 }) => {
   const effectiveSize: CardSize = size || (compact ? 'board' : 'md');
   const isCitizen = card.type === 'citizen';
+  const isTool = card.type === 'tool';
+  const hasUnitStat = isCitizen || isTool;
+  const statSuffix = isTool ? 'A' : 'V';
   const baseV = instance ? instance.baseVitality : card.vitality;
   const currentV = instance ? instance.currentVitality : card.vitality;
-  const attackV = vitalityMode === 'base_attack' ? baseV : currentV;
+  const attackV = isTool ? 0 : vitalityMode === 'base_attack' ? baseV : currentV;
   const isDamaged = Boolean(instance && currentV < baseV);
   const isBuffed = Boolean(instance && currentV > baseV);
-  const readyToAttack = Boolean(canAttack && instance && !instance.attackedThisTurn);
+  const shieldActive = instance ? Boolean(instance.shieldActive) : Boolean(card.hasShield);
+  const readyToAttack = Boolean(
+    isCitizen && canAttack && instance && !instance.attackedThisTurn
+  );
   const readyToMove = Boolean(
-    canMove && instance && !instance.playedThisTurn && !instance.movedThisTurn
+    isCitizen && canMove && instance && !instance.playedThisTurn && !instance.movedThisTurn
   );
 
   // High-contrast metallic bevel frames so cards pop sharply off the dark board
   const outerBevel = isCitizen
     ? 'bg-gradient-to-b from-[#f3d46b] via-[#b88921] to-[#4f390c] border-[#fde68a]/80'
+    : isTool
+    ? 'bg-gradient-to-b from-[#94a3b8] via-[#475569] to-[#1e293b] border-[#cbd5e1]/85'
     : 'bg-gradient-to-b from-[#e2e8f0] via-[#7c8ea6] to-[#262147] border-[#e2e8f0]/80';
 
   const statusGlow = isSelected
@@ -220,11 +228,13 @@ export const CardView: React.FC<CardViewProps> = ({
           </div>
         </div>
 
-        {/* TOP-LEFT: Forged Metal Shield Emblem for Current Vitality */}
-        {isCitizen && (
+        {/* TOP-LEFT: Forged Metal Shield Emblem for Current Vitality / Armor */}
+        {hasUnitStat && (
           <div
             title={
-              vitalityMode === 'base_attack'
+              isTool
+                ? `Herramienta — Armadura actual: ${currentV}A/${baseV}A (No cuenta como Ciudadano ni ataca)`
+                : vitalityMode === 'base_attack'
                 ? `Vitalidad actual: ${currentV}/${baseV} | Daño de ataque: ${attackV}`
                 : `Vitalidad (Salud y Daño): ${currentV}V (Base: ${baseV}V)`
             }
@@ -234,8 +244,26 @@ export const CardView: React.FC<CardViewProps> = ({
               <svg viewBox="0 0 36 42" className="absolute inset-0 w-full h-full">
                 <path
                   d="M18 2 L33 8 L30 26 C28 33 18 39 18 39 C18 39 8 33 6 26 L3 8 Z"
-                  fill={isDamaged ? '#7f1d1d' : isBuffed ? '#14532d' : '#26201a'}
-                  stroke={isDamaged ? '#fca5a5' : isBuffed ? '#86efac' : '#f3d46b'}
+                  fill={
+                    isDamaged
+                      ? '#7f1d1d'
+                      : isBuffed
+                      ? '#14532d'
+                      : isTool
+                      ? '#1e293b'
+                      : '#26201a'
+                  }
+                  stroke={
+                    shieldActive
+                      ? '#38bdf8'
+                      : isDamaged
+                      ? '#fca5a5'
+                      : isBuffed
+                      ? '#86efac'
+                      : isTool
+                      ? '#cbd5e1'
+                      : '#f3d46b'
+                  }
                   strokeWidth="2.8"
                 />
                 <path
@@ -246,20 +274,33 @@ export const CardView: React.FC<CardViewProps> = ({
                 />
               </svg>
               <span
-                className={`relative z-10 font-display font-black text-[11px] leading-none ${
+                className={`relative z-10 font-display font-black text-[10.5px] leading-none ${
                   isDamaged
                     ? 'text-[#fecaca]'
                     : isBuffed
                     ? 'text-[#bbf7d0]'
+                    : isTool
+                    ? 'text-[#f1f5f9]'
                     : 'text-[#fef3c7]'
                 }`}
               >
                 {currentV}
+                {isTool ? 'A' : ''}
               </span>
             </div>
 
+            {/* Active Shield Indicator */}
+            {shieldActive && (
+              <div
+                title="Escudo Activo (evita el próximo daño que fuera a recibir)"
+                className="-ml-1 px-1 py-0.2 rounded-r bg-[#0c4a6e] border border-[#38bdf8] text-[8px] font-display font-bold text-[#e0f2fe] shadow-md flex items-center"
+              >
+                🛡️
+              </div>
+            )}
+
             {/* Integrated Base Attack Sword Tag when different from CurrentV */}
-            {(attackV !== currentV || vitalityMode === 'base_attack') && (
+            {isCitizen && (attackV !== currentV || vitalityMode === 'base_attack') && (
               <div
                 title={`Daño de Ataque: ${attackV}`}
                 className="-ml-1 px-1 py-0.2 rounded-r bg-[#2b2219] border border-[#f3d46b]/80 text-[8px] font-display font-bold text-[#fde68a] shadow-md flex items-center gap-0.5"
@@ -271,9 +312,16 @@ export const CardView: React.FC<CardViewProps> = ({
           </div>
         )}
 
-        {/* TOP-RIGHT: Elegant Floating Status Badge (Zzz / Ready Sword / Movable) */}
+        {/* TOP-RIGHT: Elegant Floating Status Badge (Zzz / Ready Sword / Movable / Tool) */}
         <div className="absolute -top-1.5 -right-1 z-20 flex items-center gap-0.5">
-          {instance?.playedThisTurn ? (
+          {isTool ? (
+            <span
+              title="Herramienta desplegada (estructura fija)"
+              className="px-1 py-0.2 rounded bg-[#1e293b]/95 border border-[#94a3b8] text-[7.5px] font-display font-bold text-[#e2e8f0] shadow-md"
+            >
+              ⚙️
+            </span>
+          ) : instance?.playedThisTurn ? (
             <span
               title="Agotado (jugado este turno, no puede moverse)"
               className="px-1 py-0.2 rounded bg-[#181411]/95 border border-[#8a7968] text-[8px] font-display font-bold text-[#d6c7b8] shadow-md"
@@ -367,18 +415,23 @@ export const CardView: React.FC<CardViewProps> = ({
             {card.name}
           </span>
 
-          {/* Compact Top-Right Forged Shield Crest for Citizens or Arcane Crest for Events */}
-          {isCitizen ? (
+          {/* Compact Top-Right Forged Shield Crest for Citizens/Tools or Arcane Crest for Events */}
+          {hasUnitStat ? (
             <div
               className={`shrink-0 flex items-center px-1 py-0.2 rounded-sm font-display font-black border shadow ${
                 effectiveSize === 'hand' ? 'text-[9px]' : 'text-[11px]'
               } ${
                 isDamaged
                   ? 'bg-[#7f1d1d] border-[#fca5a5] text-[#fecaca]'
+                  : isTool
+                  ? 'bg-gradient-to-b from-[#cbd5e1] to-[#475569] border-[#f1f5f9] text-[#0f172a]'
                   : 'bg-gradient-to-b from-[#f3d46b] to-[#966e15] border-[#fef9c3] text-[#14100c]'
               }`}
             >
-              <span>{currentV}V</span>
+              <span>
+                {currentV}
+                {statSuffix}
+              </span>
             </div>
           ) : (
             <span className="shrink-0 text-[#e2e8f0] pl-0.5">
@@ -395,19 +448,55 @@ export const CardView: React.FC<CardViewProps> = ({
         </div>
 
         {/* 3. Faction / Type Ribbon */}
-        <div className="relative z-10 mt-0.5 px-1 py-0.2 bg-[#16120f] border-y border-[#6b5a48] flex items-center justify-between">
+        <div className="relative z-10 mt-0.5 px-1 py-0.2 bg-[#16120f] border-y border-[#6b5a48] flex items-center justify-between gap-1">
           <span
-            className={`font-display uppercase tracking-wider font-bold ${
+            className={`font-display uppercase tracking-wider font-bold truncate ${
               effectiveSize === 'hand' ? 'text-[6.8px]' : 'text-[8.5px]'
-            } ${isCitizen ? 'text-[#e3c158]' : 'text-[#c7d2fe]'}`}
+            } ${
+              isCitizen
+                ? 'text-[#e3c158]'
+                : isTool
+                ? 'text-[#cbd5e1]'
+                : 'text-[#c7d2fe]'
+            }`}
           >
-            {isCitizen ? 'Ciudadano • Bastión' : 'Evento • Efecto'}
+            {isCitizen
+              ? 'Ciudadano • Bastión'
+              : isTool
+              ? 'Herramienta • Bastión'
+              : 'Evento • Efecto'}
           </span>
-          {card.isCustom && (
-            <span className="text-[7px] font-display uppercase px-1 rounded-sm bg-[#3a2e21] text-[#f3d46b] border border-[#c59b27]/50">
-              Forjada
-            </span>
-          )}
+          <div className="flex items-center gap-0.5 shrink-0">
+            {card.isSpy && (
+              <span
+                title="Espía (se juega del lado del oponente)"
+                className="text-[7px] font-display uppercase px-1 rounded-sm bg-[#3b0764] text-[#e9d5ff] border border-[#a855f7]/60"
+              >
+                Espía
+              </span>
+            )}
+            {card.hasShield && (
+              <span
+                title="Escudo"
+                className="text-[7px] font-display uppercase px-1 rounded-sm bg-[#0c4a6e] text-[#bae6fd] border border-[#38bdf8]/60"
+              >
+                Escudo
+              </span>
+            )}
+            {card.playFromDiscard && (
+              <span
+                title="Jugable desde el Descarte"
+                className="text-[7px] font-display uppercase px-1 rounded-sm bg-[#14532d] text-[#bbf7d0] border border-[#4ade80]/60"
+              >
+                ♻️
+              </span>
+            )}
+            {card.isCustom && (
+              <span className="text-[7px] font-display uppercase px-1 rounded-sm bg-[#3a2e21] text-[#f3d46b] border border-[#c59b27]/50">
+                Forjada
+              </span>
+            )}
+          </div>
         </div>
 
         {/* 4. Dark Parchment Rules Text Box */}

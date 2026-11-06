@@ -133,7 +133,22 @@ export function getAllDecks(): DeckPreset[] {
       return DEFAULT_DECKS;
     }
     const parsed: DeckPreset[] = JSON.parse(raw);
-    return parsed.length > 0 ? parsed : DEFAULT_DECKS;
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+      return DEFAULT_DECKS;
+    }
+    // Ensure any newly added official starter deck (such as ingenio_y_chatarra) is present if not overridden
+    const existingIds = new Set(parsed.map((d) => d.id));
+    let added = false;
+    for (const defDeck of DEFAULT_DECKS) {
+      if (!existingIds.has(defDeck.id)) {
+        parsed.push(defDeck);
+        added = true;
+      }
+    }
+    if (added) {
+      localStorage.setItem(KEYS.DECKS, JSON.stringify(parsed));
+    }
+    return parsed;
   } catch {
     return DEFAULT_DECKS;
   }
@@ -246,7 +261,17 @@ function describeStep(step: EffectStep): string {
           : step.destZone === 'combat'
           ? 'la Zona de Combate'
           : 'esta fila';
-      return `Invoca ${count} ${name} (${vit}V) en ${zoneLabel}.`;
+      let baseText = `Convoca ${count} ${name} (${vit}V) en ${zoneLabel}`;
+      const deathAb = step.tokenDef?.abilities?.find((a) => a.trigger === 'on_death');
+      const deathToken = deathAb?.steps?.find((s) => s.op === 'summon_token')?.tokenDef;
+      if (deathToken) {
+        baseText += ` con “Último deseo: convoca ${deathToken.count || 1} ${deathToken.name} (${deathToken.vitality || 1}V)”`;
+      }
+      baseText += '.';
+      if (step.tokenDef?.bonusCountIfEnemyMorePoints && step.tokenDef.bonusCountIfEnemyMorePoints > 0) {
+        baseText += ` Si el oponente tiene más puntos de Desarrollo, convoca ${count + step.tokenDef.bonusCountIfEnemyMorePoints}.`;
+      }
+      return baseText;
     }
     case 'deal_damage': {
       const amt = step.amount || 1;
@@ -258,6 +283,23 @@ function describeStep(step: EffectStep): string {
     case 'draw_cards': {
       const amt = step.amount || 1;
       return `Levanta ${amt} carta${amt > 1 ? 's' : ''} del mazo.`;
+    }
+    case 'discard_cards': {
+      const amt = step.amount || 1;
+      return `Descarta ${amt} carta${amt > 1 ? 's' : ''} de tu mano.`;
+    }
+    case 'summon_self': {
+      const zoneLabel =
+        step.destZone === 'city'
+          ? 'La Ciudad'
+          : step.destZone === 'combat'
+          ? 'la Zona de Combate'
+          : 'El Camino';
+      return `La convocas a ${zoneLabel}.`;
+    }
+    case 'mill_or_sacrifice': {
+      const amt = step.amount || 3;
+      return `Triturá ${amt} cartas de tu descarte o sacrificá esta carta.`;
     }
     case 'move_zone': {
       const src = step.target?.zones?.[0] || 'discard';
@@ -277,6 +319,9 @@ function describeStep(step: EffectStep): string {
       return `Mueve una carta de ${srcLabel} a ${destLabel}.${shuffleText}`;
     }
     case 'destroy': {
+      if (step.target?.requirement === 'right_neighbor') {
+        return 'Destruí al ciudadano a la derecha de esta carta.';
+      }
       return `Destruye un ciudadano ${ownerLabel}.`;
     }
     case 'modify_stat': {
@@ -292,24 +337,41 @@ function describeStep(step: EffectStep): string {
   }
 }
 
-export function generateCardDescription(abilities: Ability[]): string {
-  if (!abilities || abilities.length === 0) {
-    return 'Sin habilidades.';
-  }
+export function generateCardDescription(
+  abilities: Ability[],
+  keywords?: { isSpy?: boolean; hasShield?: boolean; playFromDiscard?: boolean }
+): string {
   const parts: string[] = [];
-  for (const ab of abilities) {
-    const prefix =
-      ab.trigger === 'on_play'
-        ? 'Al jugar: '
-        : ab.trigger === 'on_turn_start'
-        ? 'Al comienzo del turno: '
-        : ab.trigger === 'on_turn_end'
-        ? 'Al final del turno: '
-        : '';
-    const stepTexts = ab.steps.map(describeStep).filter(Boolean).join(' ');
-    if (stepTexts) {
-      parts.push(`${prefix}${stepTexts}`);
+  if (keywords?.isSpy) {
+    parts.push('Espía (se juega del lado del oponente).');
+  }
+  if (keywords?.hasShield) {
+    parts.push('Escudo (evita el primer daño que fuera a recibir y luego pierde el escudo).');
+  }
+  if (abilities && abilities.length > 0) {
+    for (const ab of abilities) {
+      const prefix =
+        ab.trigger === 'on_play'
+          ? 'Al jugar: '
+          : ab.trigger === 'on_turn_start'
+          ? 'Al comienzo del turno: '
+          : ab.trigger === 'on_turn_end'
+          ? 'Al final del turno: '
+          : ab.trigger === 'on_death'
+          ? 'Último deseo: '
+          : ab.trigger === 'on_event_played'
+          ? 'Cuando juegues un Evento: '
+          : ab.trigger === 'on_discard'
+          ? 'Cuando descartas esta carta: '
+          : '';
+      const stepTexts = ab.steps.map(describeStep).filter(Boolean).join(' ');
+      if (stepTexts) {
+        parts.push(`${prefix}${stepTexts}`);
+      }
     }
+  }
+  if (keywords?.playFromDiscard) {
+    parts.push('Podés jugar esta carta desde el descarte.');
   }
   return parts.length > 0 ? parts.join(' ') : 'Sin habilidades.';
 }
@@ -373,7 +435,8 @@ function sanitizeImportedCard(raw: any): CardDefinition | null {
   const name = typeof raw.name === 'string' ? raw.name.trim() : '';
   if (!name) return null;
 
-  const type = raw.type === 'event' ? 'event' : 'citizen';
+  const type =
+    raw.type === 'event' ? 'event' : raw.type === 'tool' ? 'tool' : 'citizen';
   const id =
     typeof raw.id === 'string' && raw.id.trim()
       ? raw.id.trim()
@@ -386,7 +449,7 @@ function sanitizeImportedCard(raw: any): CardDefinition | null {
         Math.random().toString(36).substring(2, 6);
 
   const vitality =
-    type === 'citizen'
+    type === 'citizen' || type === 'tool'
       ? Math.max(1, Number.isFinite(Number(raw.vitality)) ? Number(raw.vitality) : 1)
       : 0;
 
@@ -394,12 +457,18 @@ function sanitizeImportedCard(raw: any): CardDefinition | null {
     ? raw.abilities
     : undefined;
 
+  const isSpy = raw.isSpy === true;
+  const hasShield = raw.hasShield === true;
+  const playFromDiscard = raw.playFromDiscard === true;
+
   const description =
     typeof raw.description === 'string' && raw.description.trim()
       ? raw.description.trim()
-      : abilities && abilities.length > 0
-      ? generateCardDescription(abilities)
-      : 'Sin habilidades.';
+      : generateCardDescription(abilities || [], {
+          isSpy,
+          hasShield,
+          playFromDiscard,
+        });
 
   const isCanonicalDefault = DEFAULT_CARD_ID_SET.has(id) && raw.isCustom !== true;
 
@@ -410,6 +479,9 @@ function sanitizeImportedCard(raw: any): CardDefinition | null {
     vitality,
     description,
     ...(abilities && abilities.length > 0 ? { abilities } : {}),
+    ...(isSpy ? { isSpy: true } : {}),
+    ...(hasShield ? { hasShield: true } : {}),
+    ...(playFromDiscard ? { playFromDiscard: true } : {}),
     ...(raw.artColor ? { artColor: String(raw.artColor) } : {}),
     ...(raw.artIcon ? { artIcon: String(raw.artIcon) } : {}),
     ...(raw.artImage ? { artImage: String(raw.artImage) } : {}),

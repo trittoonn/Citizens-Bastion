@@ -74,6 +74,26 @@ function createDefaultStep(op: EffectOpType): EffectStep {
         op: 'draw_cards',
         amount: 1,
       };
+    case 'discard_cards':
+      return {
+        op: 'discard_cards',
+        amount: 1,
+        target: {
+          requirement: 'single_card',
+          owner: 'self',
+          zones: ['hand'],
+        },
+      };
+    case 'summon_self':
+      return {
+        op: 'summon_self',
+        destZone: 'road',
+      };
+    case 'mill_or_sacrifice':
+      return {
+        op: 'mill_or_sacrifice',
+        amount: 3,
+      };
     case 'move_zone':
       return {
         op: 'move_zone',
@@ -114,6 +134,9 @@ export const CardCreatorModal: React.FC<CardCreatorModalProps> = ({ onClose, onS
   const [name, setName] = useState('');
   const [type, setType] = useState<CardType>('citizen');
   const [vitality, setVitality] = useState(5);
+  const [isSpy, setIsSpy] = useState(false);
+  const [hasShield, setHasShield] = useState(false);
+  const [playFromDiscard, setPlayFromDiscard] = useState(false);
   const [artColor, setArtColor] = useState(COLOR_OPTIONS[0]);
   const [artIcon, setArtIcon] = useState(ICON_OPTIONS[0]);
   const [artImageUrl, setArtImageUrl] = useState('');
@@ -123,10 +146,15 @@ export const CardCreatorModal: React.FC<CardCreatorModalProps> = ({ onClose, onS
   const handleTypeChange = (nextType: CardType) => {
     setType(nextType);
     if (nextType === 'event') {
+      setIsSpy(false);
+      setHasShield(false);
       setAbilities((prev) =>
         prev.map((a) => ({ ...a, trigger: 'immediate' as TriggerType }))
       );
     } else {
+      if (nextType === 'tool') {
+        setIsSpy(false);
+      }
       setAbilities((prev) =>
         prev.map((a) =>
           a.trigger === 'immediate' ? { ...a, trigger: 'on_play' as TriggerType } : a
@@ -189,16 +217,23 @@ export const CardCreatorModal: React.FC<CardCreatorModalProps> = ({ onClose, onS
     );
   };
 
-  const autoDescription = generateCardDescription(abilities);
+  const autoDescription = generateCardDescription(abilities, {
+    isSpy: type === 'citizen' ? isSpy : false,
+    hasShield: type !== 'event' ? hasShield : false,
+    playFromDiscard,
+  });
   const finalDescription = customDescription.trim() || autoDescription;
 
   const previewCard: CardDefinition = {
     id: 'preview_card',
     name: name.trim() || 'Nueva Carta',
     type,
-    vitality: type === 'citizen' ? Math.max(1, vitality) : 0,
+    vitality: type === 'citizen' || type === 'tool' ? Math.max(1, vitality) : 0,
     description: finalDescription,
     abilities,
+    ...(type === 'citizen' && isSpy ? { isSpy: true } : {}),
+    ...(type !== 'event' && hasShield ? { hasShield: true } : {}),
+    ...(playFromDiscard ? { playFromDiscard: true } : {}),
     isCustom: true,
     artColor,
     artIcon,
@@ -274,16 +309,21 @@ export const CardCreatorModal: React.FC<CardCreatorModalProps> = ({ onClose, onS
                   onChange={(e) => handleTypeChange(e.target.value as CardType)}
                   className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-sm text-white focus:border-amber-500 focus:outline-none"
                 >
-                  <option value="citizen">Ciudadano</option>
-                  <option value="event">Evento</option>
+                  <option value="citizen">Ciudadano (Vitalidad V)</option>
+                  <option value="tool">Herramienta (Armadura A)</option>
+                  <option value="event">Evento (Efecto Inmediato)</option>
                 </select>
               </div>
             </div>
 
-            {type === 'citizen' && (
+            {(type === 'citizen' || type === 'tool') && (
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Vitalidad (V): <span className="text-amber-400 font-bold">{vitality}V</span>
+                  {type === 'tool' ? 'Armadura (A)' : 'Vitalidad (V)'}:{' '}
+                  <span className="text-amber-400 font-bold">
+                    {vitality}
+                    {type === 'tool' ? 'A' : 'V'}
+                  </span>
                 </label>
                 <input
                   type="range"
@@ -295,6 +335,61 @@ export const CardCreatorModal: React.FC<CardCreatorModalProps> = ({ onClose, onS
                 />
               </div>
             )}
+
+            {/* Keywords & Special Attributes */}
+            <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800 space-y-2">
+              <span className="block text-xs font-bold text-amber-300 uppercase tracking-wider">
+                Palabras Clave y Mecánicas Especiales
+              </span>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                {type === 'citizen' && (
+                  <label className="flex items-center gap-2 p-2 rounded-lg bg-slate-900/90 border border-slate-800 cursor-pointer hover:border-purple-500/50">
+                    <input
+                      type="checkbox"
+                      checked={isSpy}
+                      onChange={(e) => setIsSpy(e.target.checked)}
+                      className="accent-purple-500"
+                    />
+                    <span className="text-slate-200 font-semibold">
+                      🗡️ Espía{' '}
+                      <span className="block text-[10px] text-slate-400 font-normal">
+                        Se juega del lado del oponente
+                      </span>
+                    </span>
+                  </label>
+                )}
+                {type !== 'event' && (
+                  <label className="flex items-center gap-2 p-2 rounded-lg bg-slate-900/90 border border-slate-800 cursor-pointer hover:border-sky-500/50">
+                    <input
+                      type="checkbox"
+                      checked={hasShield}
+                      onChange={(e) => setHasShield(e.target.checked)}
+                      className="accent-sky-500"
+                    />
+                    <span className="text-slate-200 font-semibold">
+                      🛡️ Escudo{' '}
+                      <span className="block text-[10px] text-slate-400 font-normal">
+                        Evita el primer daño recibido
+                      </span>
+                    </span>
+                  </label>
+                )}
+                <label className="flex items-center gap-2 p-2 rounded-lg bg-slate-900/90 border border-slate-800 cursor-pointer hover:border-emerald-500/50">
+                  <input
+                    type="checkbox"
+                    checked={playFromDiscard}
+                    onChange={(e) => setPlayFromDiscard(e.target.checked)}
+                    className="accent-emerald-500"
+                  />
+                  <span className="text-slate-200 font-semibold">
+                    ♻️ Desde el Descarte{' '}
+                    <span className="block text-[10px] text-slate-400 font-normal">
+                      Jugable desde tu pila de descarte
+                    </span>
+                  </span>
+                </label>
+              </div>
+            </div>
 
             {/* Color & Icon Pickers */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -374,7 +469,7 @@ export const CardCreatorModal: React.FC<CardCreatorModalProps> = ({ onClose, onS
                         <span className="text-xs font-semibold text-slate-400">
                           Disparador:
                         </span>
-                        {type === 'citizen' ? (
+                        {type !== 'event' ? (
                           <select
                             value={ab.trigger}
                             onChange={(e) =>
@@ -385,6 +480,9 @@ export const CardCreatorModal: React.FC<CardCreatorModalProps> = ({ onClose, onS
                             <option value="on_play">Al jugar</option>
                             <option value="on_turn_start">Al comienzo del turno</option>
                             <option value="on_turn_end">Al final del turno</option>
+                            <option value="on_death">Último deseo (Al ser destruido)</option>
+                            <option value="on_event_played">Cuando juegues un Evento</option>
+                            <option value="on_discard">Cuando descartas esta carta</option>
                           </select>
                         ) : (
                           <span className="text-xs px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 font-semibold">
@@ -431,8 +529,11 @@ export const CardCreatorModal: React.FC<CardCreatorModalProps> = ({ onClose, onS
                               className="px-2.5 py-1 rounded bg-slate-950 border border-slate-700 text-xs text-white font-semibold"
                             >
                               <option value="deal_damage">Hacer Daño</option>
-                              <option value="summon_token">Invocar Ciudadano Token</option>
+                              <option value="summon_token">Convocar Ciudadano Token</option>
                               <option value="draw_cards">Levantar Cartas del Mazo</option>
+                              <option value="discard_cards">Descartar Carta de tu Mano</option>
+                              <option value="summon_self">Convocar esta carta desde el Descarte</option>
+                              <option value="mill_or_sacrifice">Triturar X del Descarte o Sacrificar esta carta</option>
                               <option value="move_zone">Mover Carta entre Zonas (Buscar/Recuperar)</option>
                               <option value="destroy">Destruir / Sacrificar Ciudadano</option>
                               <option value="modify_stat">Modificar Vitalidad (+V / Curar)</option>
@@ -452,15 +553,18 @@ export const CardCreatorModal: React.FC<CardCreatorModalProps> = ({ onClose, onS
                           {/* Dynamic parameters per op */}
                           {(step.op === 'deal_damage' ||
                             step.op === 'draw_cards' ||
-                            step.op === 'modify_stat') && (
+                            step.op === 'modify_stat' ||
+                            step.op === 'mill_or_sacrifice') && (
                             <div className="flex items-center gap-3 flex-wrap text-xs">
                               <label className="text-slate-400">
-                                Cantidad:
+                                {step.op === 'mill_or_sacrifice'
+                                  ? 'Cartas a triturar del Descarte:'
+                                  : 'Cantidad:'}
                                 <input
                                   type="number"
                                   min={step.op === 'modify_stat' ? -10 : 1}
                                   max={20}
-                                  value={step.amount ?? 1}
+                                  value={step.amount ?? (step.op === 'mill_or_sacrifice' ? 3 : 1)}
                                   onChange={(e) =>
                                     updateStep(abIdx, stepIdx, {
                                       ...step,
@@ -473,67 +577,237 @@ export const CardCreatorModal: React.FC<CardCreatorModalProps> = ({ onClose, onS
                             </div>
                           )}
 
+                          {step.op === 'summon_self' && (
+                            <div className="flex items-center gap-2 text-xs">
+                              <span className="text-slate-400">Convocar en:</span>
+                              <select
+                                value={step.destZone || 'road'}
+                                onChange={(e) =>
+                                  updateStep(abIdx, stepIdx, {
+                                    ...step,
+                                    destZone: e.target.value as ZoneID,
+                                  })
+                                }
+                                className="px-2 py-1 rounded bg-slate-950 border border-slate-700 text-white"
+                              >
+                                <option value="road">El Camino</option>
+                                <option value="city">La Ciudad</option>
+                                <option value="combat">Zona de Combate</option>
+                              </select>
+                            </div>
+                          )}
+
                           {step.op === 'summon_token' && (
-                            <div className="grid grid-cols-3 gap-2 text-xs">
-                              <div>
-                                <span className="text-slate-400 block">Nombre Token</span>
-                                <input
-                                  type="text"
-                                  value={step.tokenDef?.name || 'Recluta'}
-                                  onChange={(e) =>
-                                    updateStep(abIdx, stepIdx, {
-                                      ...step,
-                                      tokenDef: {
-                                        ...(step.tokenDef || {
-                                          id: 'token_custom',
-                                          vitality: 1,
-                                        }),
-                                        name: e.target.value,
-                                      },
-                                    })
-                                  }
-                                  className="w-full px-2 py-1 rounded bg-slate-950 border border-slate-700 text-white"
-                                />
+                            <div className="space-y-2 text-xs">
+                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                                <div>
+                                  <span className="text-slate-400 block">Nombre Token</span>
+                                  <input
+                                    type="text"
+                                    value={step.tokenDef?.name || 'Recluta'}
+                                    onChange={(e) =>
+                                      updateStep(abIdx, stepIdx, {
+                                        ...step,
+                                        tokenDef: {
+                                          ...(step.tokenDef || {
+                                            id: 'token_custom',
+                                            vitality: 1,
+                                          }),
+                                          name: e.target.value,
+                                        },
+                                      })
+                                    }
+                                    className="w-full px-2 py-1 rounded bg-slate-950 border border-slate-700 text-white"
+                                  />
+                                </div>
+                                <div>
+                                  <span className="text-slate-400 block">Vitalidad (V)</span>
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    max={15}
+                                    value={step.tokenDef?.vitality || 1}
+                                    onChange={(e) =>
+                                      updateStep(abIdx, stepIdx, {
+                                        ...step,
+                                        tokenDef: {
+                                          ...(step.tokenDef || {
+                                            id: 'token_custom',
+                                            name: 'Recluta',
+                                          }),
+                                          vitality: Number(e.target.value),
+                                        },
+                                      })
+                                    }
+                                    className="w-full px-2 py-1 rounded bg-slate-950 border border-slate-700 text-white"
+                                  />
+                                </div>
+                                <div>
+                                  <span className="text-slate-400 block">Cantidad</span>
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    max={5}
+                                    value={step.tokenDef?.count || 1}
+                                    onChange={(e) =>
+                                      updateStep(abIdx, stepIdx, {
+                                        ...step,
+                                        tokenDef: {
+                                          ...(step.tokenDef || {
+                                            id: 'token_custom',
+                                            name: 'Recluta',
+                                            vitality: 1,
+                                          }),
+                                          count: Number(e.target.value),
+                                        },
+                                      })
+                                    }
+                                    className="w-full px-2 py-1 rounded bg-slate-950 border border-slate-700 text-white"
+                                  />
+                                </div>
+                                <div>
+                                  <span className="text-slate-400 block">Fila destino</span>
+                                  <select
+                                    value={step.destZone || 'same_row'}
+                                    onChange={(e) =>
+                                      updateStep(abIdx, stepIdx, {
+                                        ...step,
+                                        destZone: e.target.value as ZoneID,
+                                      })
+                                    }
+                                    className="w-full px-2 py-1 rounded bg-slate-950 border border-slate-700 text-white"
+                                  >
+                                    <option value="same_row">Esta misma fila</option>
+                                    <option value="city">La Ciudad</option>
+                                    <option value="road">El Camino</option>
+                                    <option value="combat">Zona de Combate</option>
+                                  </select>
+                                </div>
                               </div>
-                              <div>
-                                <span className="text-slate-400 block">Vitalidad (V)</span>
-                                <input
-                                  type="number"
-                                  min={1}
-                                  max={15}
-                                  value={step.tokenDef?.vitality || 1}
-                                  onChange={(e) =>
-                                    updateStep(abIdx, stepIdx, {
-                                      ...step,
-                                      tokenDef: {
-                                        ...(step.tokenDef || {
-                                          id: 'token_custom',
-                                          name: 'Recluta',
-                                        }),
-                                        vitality: Number(e.target.value),
-                                      },
-                                    })
-                                  }
-                                  className="w-full px-2 py-1 rounded bg-slate-950 border border-slate-700 text-white"
-                                />
-                              </div>
-                              <div>
-                                <span className="text-slate-400 block">Fila destino</span>
-                                <select
-                                  value={step.destZone || 'same_row'}
-                                  onChange={(e) =>
-                                    updateStep(abIdx, stepIdx, {
-                                      ...step,
-                                      destZone: e.target.value as ZoneID,
-                                    })
-                                  }
-                                  className="w-full px-2 py-1 rounded bg-slate-950 border border-slate-700 text-white"
-                                >
-                                  <option value="same_row">Esta misma fila</option>
-                                  <option value="city">La Ciudad</option>
-                                  <option value="road">El Camino</option>
-                                  <option value="combat">Zona de Combate</option>
-                                </select>
+
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                                <div>
+                                  <span className="text-slate-400 block">
+                                    Extra si el rival tiene más Puntos de Desarrollo
+                                  </span>
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    max={5}
+                                    value={step.tokenDef?.bonusCountIfEnemyMorePoints || 0}
+                                    onChange={(e) =>
+                                      updateStep(abIdx, stepIdx, {
+                                        ...step,
+                                        tokenDef: {
+                                          ...(step.tokenDef || {
+                                            id: 'token_custom',
+                                            name: 'Recluta',
+                                            vitality: 1,
+                                          }),
+                                          bonusCountIfEnemyMorePoints: Number(e.target.value),
+                                        },
+                                      })
+                                    }
+                                    className="w-full px-2 py-1 rounded bg-slate-950 border border-slate-700 text-white"
+                                  />
+                                </div>
+
+                                <div>
+                                  <span className="text-slate-400 block">
+                                    Último deseo del Token (Sub-token al morir)
+                                  </span>
+                                  <div className="flex items-center gap-1.5">
+                                    <input
+                                      type="text"
+                                      placeholder="Ej. Dron / Hermano (vacío = ninguno)"
+                                      value={
+                                        step.tokenDef?.abilities?.[0]?.steps?.[0]?.tokenDef
+                                          ?.name || ''
+                                      }
+                                      onChange={(e) => {
+                                        const subName = e.target.value;
+                                        const prevSubVit =
+                                          step.tokenDef?.abilities?.[0]?.steps?.[0]?.tokenDef
+                                            ?.vitality || 1;
+                                        updateStep(abIdx, stepIdx, {
+                                          ...step,
+                                          tokenDef: {
+                                            ...(step.tokenDef || {
+                                              id: 'token_custom',
+                                              name: 'Robot',
+                                              vitality: 2,
+                                            }),
+                                            abilities: subName.trim()
+                                              ? [
+                                                  {
+                                                    trigger: 'on_death',
+                                                    steps: [
+                                                      {
+                                                        op: 'summon_token',
+                                                        destZone: 'same_row',
+                                                        tokenDef: {
+                                                          id: 'token_sub',
+                                                          name: subName,
+                                                          vitality: prevSubVit,
+                                                          count: 1,
+                                                        },
+                                                      },
+                                                    ],
+                                                  },
+                                                ]
+                                              : undefined,
+                                          },
+                                        });
+                                      }}
+                                      className="flex-1 px-2 py-1 rounded bg-slate-950 border border-slate-700 text-white"
+                                    />
+                                    {step.tokenDef?.abilities?.[0]?.steps?.[0]?.tokenDef?.name && (
+                                      <input
+                                        type="number"
+                                        min={1}
+                                        max={10}
+                                        title="Vitalidad del Sub-token"
+                                        value={
+                                          step.tokenDef?.abilities?.[0]?.steps?.[0]?.tokenDef
+                                            ?.vitality || 1
+                                        }
+                                        onChange={(e) => {
+                                          const subName =
+                                            step.tokenDef?.abilities?.[0]?.steps?.[0]?.tokenDef
+                                              ?.name || 'Dron';
+                                          updateStep(abIdx, stepIdx, {
+                                            ...step,
+                                            tokenDef: {
+                                              ...(step.tokenDef || {
+                                                id: 'token_custom',
+                                                name: 'Robot',
+                                                vitality: 2,
+                                              }),
+                                              abilities: [
+                                                {
+                                                  trigger: 'on_death',
+                                                  steps: [
+                                                    {
+                                                      op: 'summon_token',
+                                                      destZone: 'same_row',
+                                                      tokenDef: {
+                                                        id: 'token_sub',
+                                                        name: subName,
+                                                        vitality: Number(e.target.value),
+                                                        count: 1,
+                                                      },
+                                                    },
+                                                  ],
+                                                },
+                                              ],
+                                            },
+                                          });
+                                        }}
+                                        className="w-14 px-2 py-1 rounded bg-slate-950 border border-slate-700 text-white"
+                                      />
+                                    )}
+                                  </div>
+                                </div>
                               </div>
                             </div>
                           )}
@@ -559,33 +833,39 @@ export const CardCreatorModal: React.FC<CardCreatorModalProps> = ({ onClose, onS
                                 >
                                   <option value="single_card">1 Objetivo a elección</option>
                                   <option value="all_matching">Todos los que coincidan</option>
-                                  {type === 'citizen' && (
-                                    <option value="self_card">Esta misma carta</option>
+                                  {type !== 'event' && (
+                                    <>
+                                      <option value="right_neighbor">
+                                        Ciudadano a la derecha de esta carta
+                                      </option>
+                                      <option value="self_card">Esta misma carta</option>
+                                    </>
                                   )}
                                 </select>
                               </div>
-                              {step.target?.requirement !== 'self_card' && (
-                                <div>
-                                  <span className="text-slate-400 block">Controlador objetivo</span>
-                                  <select
-                                    value={step.target?.owner || 'enemy'}
-                                    onChange={(e) =>
-                                      updateStep(abIdx, stepIdx, {
-                                        ...step,
-                                        target: {
-                                          ...(step.target || { requirement: 'single_card' }),
-                                          owner: e.target.value as TargetOwner,
-                                        },
-                                      })
-                                    }
-                                    className="w-full px-2 py-1 rounded bg-slate-950 border border-slate-700 text-white"
-                                  >
-                                    <option value="enemy">Enemigo</option>
-                                    <option value="self">Propio (Aliado)</option>
-                                    <option value="any">Cualquiera</option>
-                                  </select>
-                                </div>
-                              )}
+                              {step.target?.requirement !== 'self_card' &&
+                                step.target?.requirement !== 'right_neighbor' && (
+                                  <div>
+                                    <span className="text-slate-400 block">Controlador objetivo</span>
+                                    <select
+                                      value={step.target?.owner || 'enemy'}
+                                      onChange={(e) =>
+                                        updateStep(abIdx, stepIdx, {
+                                          ...step,
+                                          target: {
+                                            ...(step.target || { requirement: 'single_card' }),
+                                            owner: e.target.value as TargetOwner,
+                                          },
+                                        })
+                                      }
+                                      className="w-full px-2 py-1 rounded bg-slate-950 border border-slate-700 text-white"
+                                    >
+                                      <option value="enemy">Enemigo</option>
+                                      <option value="self">Propio (Aliado)</option>
+                                      <option value="any">Cualquiera</option>
+                                    </select>
+                                  </div>
+                                )}
                             </div>
                           )}
 

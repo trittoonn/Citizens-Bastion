@@ -380,35 +380,204 @@ func TestAllTenBaseCardsAndTriggerOrdering(t *testing.T) {
 		t.Fatalf("SubmitPromptTarget Misión failed: %v", err)
 	}
 
-	// 8. End of Turn Trigger Order (Combat -> Road -> City, right-to-left) with Reclutador & Mago de las Tormentas
+	// 8. End of Turn Trigger Order (Combat -> Road -> City, right-to-left) with Reclutador & Granjero,
+	// plus Start of Turn trigger for Mago de las Tormentas (6V, Al comienzo del turno)
 	enemyTarget := &CardInstance{InstanceID: "e_target", OwnerID: "p2", Definition: cab, BaseVitality: 10, CurrentVitality: 10, Zone: ZoneCity}
 	p2.Board[ZoneCity] = []*CardInstance{enemyTarget}
 
-	// Place Reclutador in Combat (left) and Mago de las Tormentas in Combat (right)
+	// Place Reclutador in Combat (left) and Granjero in Combat (right)
 	rec := &CardInstance{InstanceID: "c_rec", OwnerID: "p1", Definition: cardByID("reclutador"), BaseVitality: 6, CurrentVitality: 6, Zone: ZoneCombat}
-	mago := &CardInstance{InstanceID: "c_mago", OwnerID: "p1", Definition: cardByID("mago_de_las_tormentas"), BaseVitality: 4, CurrentVitality: 4, Zone: ZoneCombat}
-	p1.Board[ZoneCombat] = []*CardInstance{rec, mago}
+	gran := &CardInstance{InstanceID: "c_gran", OwnerID: "p1", Definition: cardByID("granjero"), BaseVitality: 4, CurrentVitality: 4, Zone: ZoneCombat}
+	p1.Board[ZoneCombat] = []*CardInstance{rec, gran}
 
-	// When EndTurn is called, right-to-left in Combat means Mago (index 1) activates BEFORE Reclutador (index 0)!
+	// Also place Mago de las Tormentas (6V, Al comienzo del turno) on P2's board so when P2's turn starts it triggers!
+	mago := &CardInstance{InstanceID: "e_mago", OwnerID: "p2", Definition: cardByID("mago_de_las_tormentas"), BaseVitality: 6, CurrentVitality: 6, Zone: ZoneCity}
+	p2.Board[ZoneCity] = append(p2.Board[ZoneCity], mago)
+
+	// When P1 calls EndTurn, Granjero (rightmost) summons a Vaca (1V) and Reclutador summons a Recluta (1V),
+	// P1 gains 1 Development Point (5 vs 2 Citizens), and then P2's turn starts -> Mago de las Tormentas triggers!
 	if err := gs.EndTurn("p1"); err != nil {
 		t.Fatalf("EndTurn failed: %v", err)
 	}
-	if gs.Phase != PhaseAwaitingInput || gs.PendingPrompt == nil || gs.PendingPrompt.SourceCardID != "c_mago" {
-		t.Fatalf("expected Mago de las Tormentas (rightmost in Combat) to trigger first, got phase=%s prompt=%+v", gs.Phase, gs.PendingPrompt)
+	if len(p1.Board[ZoneCombat]) != 4 {
+		t.Fatalf("expected 4 Citizens in P1 Combat Zone after Granjero + Reclutador triggers, got %d", len(p1.Board[ZoneCombat]))
 	}
-	if err := gs.SubmitPromptTarget("p1", "e_target"); err != nil {
-		t.Fatalf("SubmitPromptTarget Mago failed: %v", err)
-	}
-	if enemyTarget.CurrentVitality != 8 {
-		t.Fatalf("expected enemyTarget at 8V after Mago, got %d", enemyTarget.CurrentVitality)
-	}
-	// Reclutador should have automatically resolved after Mago, summoning a Recluta in Combat (total 3 cards in P1 Combat)
-	if len(p1.Board[ZoneCombat]) != 3 {
-		t.Fatalf("expected 3 Citizens in P1 Combat Zone after Reclutador trigger, got %d", len(p1.Board[ZoneCombat]))
-	}
-	// And P1 had more Citizens than P2 (4 vs 1), so P1 gained 1 Development Point!
 	if p1.DevelopmentPoints != 1 {
 		t.Fatalf("expected P1 to have 1 Development Point, got %d", p1.DevelopmentPoints)
+	}
+	if gs.Phase != PhaseAwaitingInput || gs.PendingPrompt == nil || gs.PendingPrompt.SourceCardID != "e_mago" {
+		t.Fatalf("expected P2's Mago de las Tormentas to trigger at start of P2's turn, got phase=%s prompt=%+v", gs.Phase, gs.PendingPrompt)
+	}
+	if err := gs.SubmitPromptTarget("p2", "c_rec"); err != nil {
+		t.Fatalf("SubmitPromptTarget Mago failed: %v", err)
+	}
+	if rec.CurrentVitality != 4 {
+		t.Fatalf("expected Reclutador at 4V after Mago's 2 damage, got %d", rec.CurrentVitality)
+	}
+}
+
+func TestExpansionCardsAndNewMechanics(t *testing.T) {
+	rules := DefaultRulesConfig()
+	rules.MaxPlaysPerTurn = 10
+	rules.FirstTurnMaxPlays = 10
+	cab := cardByID("caballero_galardonado")
+
+	gs := NewGameState("g_exp", "Expansion Test", rules)
+	_ = gs.AddPlayer("p1", "Alice", makeUniformDeck(cab, 15))
+	_ = gs.AddPlayer("p2", "Bob", makeUniformDeck(cab, 15))
+	_ = gs.ApplyMulligan("p1", nil)
+	_ = gs.ApplyMulligan("p2", nil)
+
+	p1 := gs.Players[0]
+	p2 := gs.Players[1]
+	p1.Hand = nil
+	p2.Hand = nil
+
+	// 1. Protector de los débiles (7V, Escudo): absorbs first damage and loses shield
+	prot := &CardInstance{InstanceID: "p2_prot", OwnerID: "p2", Definition: cardByID("protector_de_los_debiles"), Zone: ZoneCity, BaseVitality: 7, CurrentVitality: 7, ShieldActive: true}
+	p2.Board[ZoneCity] = []*CardInstance{prot}
+
+	rayo := &CardInstance{InstanceID: "p1_rayo", OwnerID: "p1", Definition: cardByID("rayo_vengativo"), Zone: ZoneHand}
+	p1.Hand = append(p1.Hand, rayo)
+	if err := gs.PlayCard("p1", "p1_rayo", ""); err != nil {
+		t.Fatalf("Play Rayo on Protector failed: %v", err)
+	}
+	if err := gs.SubmitPromptTarget("p1", "p2_prot"); err != nil {
+		t.Fatalf("Target Protector failed: %v", err)
+	}
+	if prot.CurrentVitality != 7 || prot.ShieldActive {
+		t.Fatalf("expected Protector to remain at 7V with ShieldActive=false, got %dV shield=%v", prot.CurrentVitality, prot.ShieldActive)
+	}
+
+	// 2. Asesino (1V, Espía): deployed to opponent's ZoneCity at index 0, destroys the Citizen to its right (Protector!)
+	asesino := &CardInstance{InstanceID: "p1_asesino", OwnerID: "p1", Definition: cardByID("asesino"), Zone: ZoneHand}
+	p1.Hand = append(p1.Hand, asesino)
+	if err := gs.PlayCard("p1", "p1_asesino", ZoneCity); err != nil {
+		t.Fatalf("Play Asesino failed: %v", err)
+	}
+	if len(p2.Board[ZoneCity]) != 1 || p2.Board[ZoneCity][0].InstanceID != "p1_asesino" {
+		t.Fatalf("expected Protector to be assassinated and only Asesino (1V) left on P2's ZoneCity, got %d cards", len(p2.Board[ZoneCity]))
+	}
+
+	// 3. Explorador de basura (9V) + Nadador de basura (3V):
+	// Playing Explorador discards Nadador from hand -> Nadador's on_discard summons itself to ZoneRoad -> Explorador draws 1 card!
+	explorador := &CardInstance{InstanceID: "p1_exp", OwnerID: "p1", Definition: cardByID("explorador_de_basura"), Zone: ZoneHand}
+	nadador := &CardInstance{InstanceID: "p1_nad", OwnerID: "p1", Definition: cardByID("nadador_de_basura"), Zone: ZoneHand}
+	p1.Hand = []*CardInstance{explorador, nadador}
+
+	if err := gs.PlayCard("p1", "p1_exp", ZoneCity); err != nil {
+		t.Fatalf("Play Explorador failed: %v", err)
+	}
+	if gs.Phase != PhaseAwaitingInput {
+		t.Fatalf("expected prompt to discard card for Explorador")
+	}
+	if err := gs.SubmitPromptTarget("p1", "p1_nad"); err != nil {
+		t.Fatalf("Discard Nadador failed: %v", err)
+	}
+	// Nadador should now be on P1's ZoneRoad, and P1 should have drawn 1 card into hand!
+	if len(p1.Board[ZoneRoad]) != 1 || p1.Board[ZoneRoad][0].InstanceID != "p1_nad" {
+		t.Fatalf("expected Nadador de basura to be summoned to El Camino on discard, got %d cards in Road", len(p1.Board[ZoneRoad]))
+	}
+	if len(p1.Hand) != 1 {
+		t.Fatalf("expected 1 drawn card in hand after Explorador, got %d", len(p1.Hand))
+	}
+
+	// 4. Demoledor de basura (8V, PlayFromDiscard):
+	// Put Demoledor in P1's Discard along with 3 other cards; play Demoledor from Discard -> mills 3 cards to Exile and stays on board!
+	demo := &CardInstance{InstanceID: "p1_demo", OwnerID: "p1", Definition: cardByID("demoledor_de_basura"), Zone: ZoneDiscard}
+	d1 := &CardInstance{InstanceID: "d1", OwnerID: "p1", Definition: cab, Zone: ZoneDiscard}
+	d2 := &CardInstance{InstanceID: "d2", OwnerID: "p1", Definition: cab, Zone: ZoneDiscard}
+	d3 := &CardInstance{InstanceID: "d3", OwnerID: "p1", Definition: cab, Zone: ZoneDiscard}
+	p1.Discard = []*CardInstance{d1, d2, d3, demo}
+
+	if err := gs.PlayCard("p1", "p1_demo", ZoneCity); err != nil {
+		t.Fatalf("Play Demoledor from Discard failed: %v", err)
+	}
+	if len(p1.Exile) != 3 {
+		t.Fatalf("expected 3 cards exiled by Demoledor, got %d", len(p1.Exile))
+	}
+	if found, _, _ := gs.findBoardCard(p1, "p1_demo"); found == nil {
+		t.Fatalf("expected Demoledor to remain on board after milling 3 cards")
+	}
+
+	// 5. Trillizos (3V -> Mellizo 2V -> Hermano 1V):
+	trill := &CardInstance{InstanceID: "p1_trill", OwnerID: "p1", Definition: cardByID("trillizos"), Zone: ZoneRoad, BaseVitality: 3, CurrentVitality: 3}
+	p1.Board[ZoneRoad] = append(p1.Board[ZoneRoad], trill)
+	gs.destroyBoardCard(p1, "p1_trill")
+	gs.processEffectQueue(PhaseMain)
+
+	var mellizoInst *CardInstance
+	for _, c := range p1.Board[ZoneRoad] {
+		if c.Definition.Name == "Mellizo" && c.CurrentVitality == 2 {
+			mellizoInst = c
+			break
+		}
+	}
+	if mellizoInst == nil {
+		t.Fatalf("expected Trillizos deathwish to summon Mellizo (2V)")
+	}
+	// Now destroy Mellizo -> should summon Hermano (1V)!
+	gs.destroyBoardCard(p1, mellizoInst.InstanceID)
+	gs.processEffectQueue(PhaseMain)
+	foundHermano := false
+	for _, c := range p1.Board[ZoneRoad] {
+		if c.Definition.Name == "Hermano" && c.CurrentVitality == 1 {
+			foundHermano = true
+			break
+		}
+	}
+	if !foundHermano {
+		t.Fatalf("expected Mellizo deathwish to summon Hermano (1V)")
+	}
+
+	// 6. Germinador (5V) + Mercenarios de emergencia (Evento):
+	// Set P2 DevelopmentPoints = 5 (> P1's 0) so Mercenarios summons 3 instead of 2, AND Germinador summons a Treant (1V)!
+	p2.DevelopmentPoints = 5
+	germ := &CardInstance{InstanceID: "p1_germ", OwnerID: "p1", Definition: cardByID("germinador"), Zone: ZoneCity, BaseVitality: 5, CurrentVitality: 5}
+	p1.Board[ZoneCity] = append(p1.Board[ZoneCity], germ)
+
+	merc := &CardInstance{InstanceID: "p1_merc", OwnerID: "p1", Definition: cardByID("mercenarios_de_emergencia"), Zone: ZoneHand}
+	p1.Hand = append(p1.Hand, merc)
+	if err := gs.PlayCard("p1", "p1_merc", ""); err != nil {
+		t.Fatalf("Play Mercenarios de emergencia failed: %v", err)
+	}
+	if len(p1.Board[ZoneCombat]) != 3 {
+		t.Fatalf("expected 3 Mercenarios (2V) in Combat Zone because enemy has more Development Points, got %d", len(p1.Board[ZoneCombat]))
+	}
+	foundTreant := false
+	for _, c := range p1.Board[ZoneCity] {
+		if c.Definition.Name == "Treant" {
+			foundTreant = true
+			break
+		}
+	}
+	if !foundTreant {
+		t.Fatalf("expected Germinador to summon a Treant (1V) when an Event was played")
+	}
+
+	// 7. Fábrica de robots (8A, Herramienta):
+	// Deploy to ZoneCity -> does NOT increase TotalCitizensOnBoard(), cannot move, and at EndTurn summons Robot (2V) with deathwish Dron (1V)!
+	citizensBefore := p1.TotalCitizensOnBoard()
+	fab := &CardInstance{InstanceID: "p1_fab", OwnerID: "p1", Definition: cardByID("fabrica_de_robots"), Zone: ZoneHand}
+	p1.Hand = append(p1.Hand, fab)
+	if err := gs.PlayCard("p1", "p1_fab", ZoneCity); err != nil {
+		t.Fatalf("Play Fábrica de robots failed: %v", err)
+	}
+	if p1.TotalCitizensOnBoard() != citizensBefore {
+		t.Fatalf("expected Tool (Fábrica de robots) NOT to count as a Citizen, before=%d after=%d", citizensBefore, p1.TotalCitizensOnBoard())
+	}
+	if err := gs.EndTurn("p1"); err != nil {
+		t.Fatalf("EndTurn with Fábrica de robots failed: %v", err)
+	}
+	var robotInst *CardInstance
+	for _, c := range p1.Board[ZoneCity] {
+		if c.Definition.Name == "Robot" && c.CurrentVitality == 2 {
+			robotInst = c
+			break
+		}
+	}
+	if robotInst == nil {
+		t.Fatalf("expected Fábrica de robots to summon Robot (2V) at end of turn")
 	}
 }
 

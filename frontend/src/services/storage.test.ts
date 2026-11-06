@@ -22,14 +22,17 @@ describe('localStorage Card & Deck Studio Service', () => {
     sessionStorage.clear();
   });
 
-  it('seeds the 10 canonical cards from Reglas 2026 v1.md by default', () => {
+  it('seeds the canonical cards from Citizens Bastion by default', () => {
     const cards = getAllCards();
-    expect(cards.length).toBe(10);
+    expect(cards.length).toBe(22);
     expect(cards.some((c) => c.id === 'caballero_galardonado')).toBe(true);
     expect(cards.some((c) => c.id === 'pacto_de_sacrificio')).toBe(true);
+    expect(cards.some((c) => c.id === 'asesino')).toBe(true);
+    expect(cards.some((c) => c.id === 'fabrica_de_robots')).toBe(true);
   });
 
   it('creates and deletes custom cards in localStorage', () => {
+    const baseCount = getAllCards().length;
     const custom: CardDefinition = {
       id: 'custom_arquero',
       name: 'Arquero del Bastión',
@@ -50,13 +53,13 @@ describe('localStorage Card & Deck Studio Service', () => {
     };
 
     const afterSave = saveCustomCard(custom);
-    expect(afterSave.length).toBe(11);
+    expect(afterSave.length).toBe(baseCount + 1);
     const saved = afterSave.find((c) => c.id === 'custom_arquero');
     expect(saved?.isCustom).toBe(true);
     expect(saved?.description).toContain('Al jugar: Hace 2 de daño');
 
     const afterDelete = deleteCustomCard('custom_arquero');
-    expect(afterDelete.length).toBe(10);
+    expect(afterDelete.length).toBe(baseCount);
   });
 
   it('supports optional deck constraints (warnings when unenforced, errors when enforced)', () => {
@@ -120,25 +123,26 @@ describe('localStorage Card & Deck Studio Service', () => {
       description: 'Al final del turno: Hace 3 de daño a un ciudadano enemigo.',
     };
 
+    const baseCount = getAllCards().length;
     const codeA = exportCardToCode(cardA);
     expect(codeA.startsWith('CB1-CARD:')).toBe(true);
 
     const multiCode = exportCardsToCode([cardA, cardB]);
 
-    // 1. Extend collection: adds cardA and cardB to the 10 canonical cards -> 12 cards
+    // 1. Extend collection: adds cardA and cardB to the canonical cards
     const extendRes = importShareCode(multiCode, 'extend');
     expect(extendRes.addedCards).toBe(2);
     expect(extendRes.skippedCards).toBe(0);
-    expect(extendRes.totalCards).toBe(12);
+    expect(extendRes.totalCards).toBe(baseCount + 2);
     expect(getAllCards().some((c) => c.id === 'custom_paladin')).toBe(true);
 
     // Pasting again in 'extend' mode skips existing cards
     const extendAgain = importShareCode(codeA, 'extend');
     expect(extendAgain.addedCards).toBe(0);
     expect(extendAgain.skippedCards).toBe(1);
-    expect(extendAgain.totalCards).toBe(12);
+    expect(extendAgain.totalCards).toBe(baseCount + 2);
 
-    // 2. Overwrite collection: deletes previous 12 cards and keeps ONLY the newly pasted cards (cardA & cardB)
+    // 2. Overwrite collection: deletes previous cards and keeps ONLY the newly pasted cards (cardA & cardB)
     const overwriteRes = importShareCode(multiCode, 'overwrite');
     expect(overwriteRes.addedCards).toBe(2);
     expect(overwriteRes.totalCards).toBe(2);
@@ -159,12 +163,12 @@ describe('localStorage Card & Deck Studio Service', () => {
 
     // Simulate another browser client with default storage
     resetCollectionToDefaults();
-    expect(getAllCards().length).toBe(10);
+    expect(getAllCards().length).toBe(baseCount);
 
     const deckImportRes = importShareCode(deckCode, 'extend');
     expect(deckImportRes.addedCards).toBe(2);
     expect(deckImportRes.importedDecks).toBe(1);
-    expect(getAllCards().length).toBe(12);
+    expect(getAllCards().length).toBe(baseCount + 2);
     const reconstructedDeck = getAllDecks().find((d) => d.name === 'Orden del Alba');
     expect(reconstructedDeck).toBeDefined();
     expect(reconstructedDeck?.cards.length).toBe(3);
@@ -176,7 +180,7 @@ describe('localStorage Card & Deck Studio Service', () => {
 
     localStorage.clear();
     const collImport = importShareCode(collCode, 'overwrite');
-    expect(collImport.totalCards).toBe(12);
+    expect(collImport.totalCards).toBe(baseCount + 2);
     expect(collImport.importedDecks).toBeGreaterThanOrEqual(3);
   });
 });

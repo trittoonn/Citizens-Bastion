@@ -36,44 +36,52 @@ func AreZonesAdjacent(from, to ZoneID) bool {
 	return false
 }
 
-// CardType distinguishes Citizens from Events.
+// CardType distinguishes Citizens, Tools, and Events.
 type CardType string
 
 const (
 	CardTypeCitizen CardType = "citizen"
 	CardTypeEvent   CardType = "event"
+	CardTypeTool    CardType = "tool"
 )
 
 // TriggerType defines when an ability activates.
 type TriggerType string
 
 const (
-	TriggerOnPlay    TriggerType = "on_play"       // Al jugar (not when summoned/invoked)
-	TriggerTurnStart TriggerType = "on_turn_start" // Al comienzo del turno (after drawing)
-	TriggerTurnEnd   TriggerType = "on_turn_end"   // Al final del turno (before Development Points)
-	TriggerImmediate TriggerType = "immediate"     // Eventos (upon being played)
+	TriggerOnPlay        TriggerType = "on_play"         // Al jugar (not when summoned/invoked)
+	TriggerTurnStart     TriggerType = "on_turn_start"   // Al comienzo del turno (after drawing)
+	TriggerTurnEnd       TriggerType = "on_turn_end"     // Al final del turno (before Development Points)
+	TriggerImmediate     TriggerType = "immediate"       // Eventos (upon being played)
+	TriggerOnDeath       TriggerType = "on_death"        // Último deseo (when destroyed on board)
+	TriggerOnEventPlayed TriggerType = "on_event_played" // Cuando juegues un Evento (while on board)
+	TriggerOnDiscard     TriggerType = "on_discard"      // Cuando descartas esta carta de tu mano
 )
 
 // EffectOpType defines the atomic action performed by an effect step.
 type EffectOpType string
 
 const (
-	EffectSummonToken EffectOpType = "summon_token" // Invoca un ciudadano token en una fila
-	EffectDealDamage  EffectOpType = "deal_damage"  // Hace X de daño a objetivo(s)
-	EffectDrawCards   EffectOpType = "draw_cards"   // Levanta X cartas del mazo
-	EffectMoveZone    EffectOpType = "move_zone"    // Mueve una carta de una zona a otra (ej. descarte/mazo/campo a mano/exilio)
-	EffectDestroy     EffectOpType = "destroy"      // Destruye un ciudadano (sacrificio o destrucción directa)
-	EffectModifyStat  EffectOpType = "modify_stat"  // Modifica Vitalidad (+V / curación o -V)
+	EffectSummonToken     EffectOpType = "summon_token"      // Invoca un ciudadano token en una fila
+	EffectDealDamage      EffectOpType = "deal_damage"       // Hace X de daño a objetivo(s)
+	EffectDrawCards       EffectOpType = "draw_cards"        // Levanta X cartas del mazo
+	EffectMoveZone        EffectOpType = "move_zone"         // Mueve una carta de una zona a otra (ej. descarte/mazo/campo a mano/exilio)
+	EffectDestroy         EffectOpType = "destroy"           // Destruye un ciudadano (sacrificio o destrucción directa)
+	EffectModifyStat      EffectOpType = "modify_stat"       // Modifica Vitalidad (+V / curación o -V)
+	EffectDiscard         EffectOpType = "discard_cards"     // Descarta carta(s) de la mano (dispara on_discard)
+	EffectSummonSelf      EffectOpType = "summon_self"       // Convoca esta misma carta desde el descarte al campo
+	EffectMillOrSacrifice EffectOpType = "mill_or_sacrifice" // Tritura X cartas del descarte o sacrifica esta carta
 )
 
 // TargetRequirement specifies how targets are chosen.
 type TargetRequirement string
 
 const (
-	TargetReqNone        TargetRequirement = "none"         // No target needed (e.g. draw_cards, summon_token)
-	TargetReqSingleCard  TargetRequirement = "single_card"  // Player chooses 1 matching card
-	TargetReqAllMatching TargetRequirement = "all_matching" // Automatically affects all matching cards
-	TargetReqSelfCard    TargetRequirement = "self_card"    // Automatically affects the source card itself
+	TargetReqNone          TargetRequirement = "none"           // No target needed (e.g. draw_cards, summon_token)
+	TargetReqSingleCard    TargetRequirement = "single_card"    // Player chooses 1 matching card
+	TargetReqAllMatching   TargetRequirement = "all_matching"   // Automatically affects all matching cards
+	TargetReqSelfCard      TargetRequirement = "self_card"      // Automatically affects the source card itself
+	TargetReqRightNeighbor TargetRequirement = "right_neighbor" // Automatically affects the card immediately to the right in the same row
 )
 
 // TargetOwner filters targets by controller.
@@ -96,11 +104,15 @@ type TargetRule struct {
 
 // TokenTemplate defines a summoned Citizen token (such as Recluta 1V).
 type TokenTemplate struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Vitality int    `json:"vitality"`
-	Count    int    `json:"count,omitempty"` // Defaults to 1
-	ArtIcon  string `json:"artIcon,omitempty"`
+	ID                          string    `json:"id"`
+	Name                        string    `json:"name"`
+	Vitality                    int       `json:"vitality"`
+	Count                       int       `json:"count,omitempty"`                       // Defaults to 1
+	BonusCountIfEnemyMorePoints int       `json:"bonusCountIfEnemyMorePoints,omitempty"` // Extra tokens if opponent has more Development Points
+	ArtIcon                     string    `json:"artIcon,omitempty"`
+	Description                 string    `json:"description,omitempty"`
+	HasShield                   bool      `json:"hasShield,omitempty"`
+	Abilities                   []Ability `json:"abilities,omitempty"`
 }
 
 // EffectStep is a single atomic step inside an Ability.
@@ -121,17 +133,20 @@ type Ability struct {
 
 // CardDefinition is the serializable blueprint of a card (base or custom).
 type CardDefinition struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Type        CardType  `json:"type"`
-	Vitality    int       `json:"vitality"` // Base Vitality (V) for Citizens; 0 for Events
-	Description string    `json:"description"`
-	Abilities   []Ability `json:"abilities,omitempty"`
-	IsToken     bool      `json:"isToken,omitempty"`
-	IsCustom    bool      `json:"isCustom,omitempty"`
-	ArtColor    string    `json:"artColor,omitempty"`
-	ArtIcon     string    `json:"artIcon,omitempty"`
-	ArtImage    string    `json:"artImage,omitempty"`
+	ID              string    `json:"id"`
+	Name            string    `json:"name"`
+	Type            CardType  `json:"type"`
+	Vitality        int       `json:"vitality"` // Base Vitality (V) for Citizens / Armor (A) for Tools; 0 for Events
+	Description     string    `json:"description"`
+	Abilities       []Ability `json:"abilities,omitempty"`
+	IsSpy           bool      `json:"isSpy,omitempty"`
+	HasShield       bool      `json:"hasShield,omitempty"`
+	PlayFromDiscard bool      `json:"playFromDiscard,omitempty"`
+	IsToken         bool      `json:"isToken,omitempty"`
+	IsCustom        bool      `json:"isCustom,omitempty"`
+	ArtColor        string    `json:"artColor,omitempty"`
+	ArtIcon         string    `json:"artIcon,omitempty"`
+	ArtImage        string    `json:"artImage,omitempty"`
 }
 
 // Validate checks that a CardDefinition is well-formed.
@@ -139,11 +154,11 @@ func (c CardDefinition) Validate() error {
 	if c.Name == "" {
 		return fmt.Errorf("el nombre de la carta es obligatorio")
 	}
-	if c.Type != CardTypeCitizen && c.Type != CardTypeEvent {
+	if c.Type != CardTypeCitizen && c.Type != CardTypeEvent && c.Type != CardTypeTool {
 		return fmt.Errorf("tipo de carta inválido: %s", c.Type)
 	}
-	if c.Type == CardTypeCitizen && c.Vitality <= 0 {
-		return fmt.Errorf("los Ciudadanos deben tener Vitalidad (V) mayor a 0")
+	if (c.Type == CardTypeCitizen || c.Type == CardTypeTool) && c.Vitality <= 0 {
+		return fmt.Errorf("los Ciudadanos y Herramientas deben tener Vitalidad/Armadura mayor a 0")
 	}
 	return nil
 }

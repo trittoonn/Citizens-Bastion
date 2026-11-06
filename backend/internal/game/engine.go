@@ -382,6 +382,8 @@ func (g *GameState) PlayCard(playerID, cardInstanceID string, targetZone ZoneID)
 	}
 
 	handIdx := -1
+	discardIdx := -1
+	fromZone := ZoneHand
 	var card *CardInstance
 	for i, c := range p.Hand {
 		if c.InstanceID == cardInstanceID {
@@ -391,28 +393,82 @@ func (g *GameState) PlayCard(playerID, cardInstanceID string, targetZone ZoneID)
 		}
 	}
 	if card == nil {
-		return fmt.Errorf("la carta no está en tu mano")
+		for i, c := range p.Discard {
+			if c.InstanceID == cardInstanceID && c.Definition.PlayFromDiscard {
+				discardIdx = i
+				card = c
+				fromZone = ZoneDiscard
+				break
+			}
+		}
+	}
+	if card == nil {
+		return fmt.Errorf("la carta no está en tu mano (ni disponible en tu descarte)")
 	}
 
-	if card.Definition.Type == CardTypeCitizen {
+	if card.Definition.Type == CardTypeCitizen || card.Definition.Type == CardTypeTool {
 		if !IsBoardZone(targetZone) {
 			return fmt.Errorf("debés elegir una zona válida del tablero (Ciudad, Camino o Zona de Combate)")
 		}
-		if targetZone == ZoneCombat && !g.CanPlayInCombat(playerID) {
-			return fmt.Errorf("solo podés jugar un Ciudadano en la Zona de Combate si el oponente tiene al menos un Ciudadano ahí")
+		if !card.Definition.IsSpy && targetZone == ZoneCombat && !g.CanPlayInCombat(playerID) {
+			return fmt.Errorf("solo podés jugar una unidad en la Zona de Combate si el oponente tiene al menos una carta ahí")
 		}
 
-		// Remove from hand and place on board
-		p.Hand = append(p.Hand[:handIdx], p.Hand[handIdx+1:]...)
+		// Remove from Hand or Discard
+		if fromZone == ZoneHand {
+			p.Hand = append(p.Hand[:handIdx], p.Hand[handIdx+1:]...)
+		} else {
+			p.Discard = append(p.Discard[:discardIdx], p.Discard[discardIdx+1:]...)
+		}
+
+		opp := g.Players[1-idx]
+		boardOwner := p
+		if card.Definition.IsSpy && opp != nil {
+			boardOwner = opp
+		}
+
+		card.OwnerID = boardOwner.ID
 		card.Zone = targetZone
 		card.BaseVitality = card.Definition.Vitality
 		card.CurrentVitality = card.Definition.Vitality
 		card.PlayedThisTurn = true
+		card.MovedThisTurn = false
 		card.AttackedThisTurn = false
-		p.Board[targetZone] = append(p.Board[targetZone], card)
-		g.PlaysRemaining--
+		card.ShieldActive = card.Definition.HasShield
 
-		g.addLog(fmt.Sprintf("%s jugó a %s (%dV) en %s.", p.Name, card.Definition.Name, card.CurrentVitality, zoneDisplayName(targetZone)))
+		placeAtStart := card.Definition.IsSpy
+		if !placeAtStart {
+			for _, ab := range card.Definition.Abilities {
+				for _, st := range ab.Steps {
+					if st.Target.Requirement == TargetReqRightNeighbor {
+						placeAtStart = true
+						break
+					}
+				}
+			}
+		}
+
+		if placeAtStart {
+			boardOwner.Board[targetZone] = append([]*CardInstance{card}, boardOwner.Board[targetZone]...)
+		} else {
+			boardOwner.Board[targetZone] = append(boardOwner.Board[targetZone], card)
+		}
+		g.PlaysRemaining--
+		g.MovesRemaining = g.countMovableCitizens(p)
+
+		statSuffix := "V"
+		if card.Definition.Type == CardTypeTool {
+			statSuffix = "A"
+		}
+		originNote := ""
+		if fromZone == ZoneDiscard {
+			originNote = " (desde el Descarte)"
+		}
+		if card.Definition.IsSpy {
+			g.addLog(fmt.Sprintf("%s infiltró al Espía %s (%d%s)%s en %s de %s.", p.Name, card.Definition.Name, card.CurrentVitality, statSuffix, originNote, zoneDisplayName(targetZone), boardOwner.Name))
+		} else {
+			g.addLog(fmt.Sprintf("%s jugó a %s (%d%s)%s en %s.", p.Name, card.Definition.Name, card.CurrentVitality, statSuffix, originNote, zoneDisplayName(targetZone)))
+		}
 
 		defCopy := card.Definition
 		g.recordAnimStep(ActionAnimationEvent{
@@ -422,9 +478,9 @@ func (g *GameState) PlayCard(playerID, cardInstanceID string, targetZone ZoneID)
 			CardInstanceID: card.InstanceID,
 			CardName:       card.Definition.Name,
 			CardDefinition: &defCopy,
-			FromZone:       ZoneHand,
+			FromZone:       fromZone,
 			ToZone:         targetZone,
-			BannerText:     fmt.Sprintf("%s despliega a %s (%dV) en %s", p.Name, card.Definition.Name, card.CurrentVitality, zoneDisplayName(targetZone)),
+			BannerText:     fmt.Sprintf("%s despliega a %s (%d%s)%s en %s", p.Name, card.Definition.Name, card.CurrentVitality, statSuffix, originNote, zoneDisplayName(targetZone)),
 		})
 
 		// Queue "Al jugar" abilities (not triggered when summoned by an effect)
@@ -447,11 +503,15 @@ func (g *GameState) PlayCard(playerID, cardInstanceID string, targetZone ZoneID)
 		return nil
 	}
 
-	// Event card: verify that any mandatory target steps have at least 1 valid target before consuming the card
+	// Event card: verify that the first step (if mandatory target) has at least 1 valid target before consuming the card
 	for _, ab := range card.Definition.Abilities {
 		if ab.Trigger == TriggerImmediate || ab.Trigger == TriggerOnPlay {
-			for _, step := range ab.Steps {
+			for stepIdx, step := range ab.Steps {
 				if step.Target.Requirement == TargetReqSingleCard {
+					// If an earlier step draws or moves cards to hand and this step discards from hand, do not block
+					if stepIdx > 0 && step.Op == EffectDiscard {
+						continue
+					}
 					candidates := g.findCandidateTargets(p.ID, card.InstanceID, step.Target)
 					if len(candidates) == 0 {
 						return fmt.Errorf("no hay objetivos válidos para jugar %s", card.Definition.Name)
@@ -461,8 +521,12 @@ func (g *GameState) PlayCard(playerID, cardInstanceID string, targetZone ZoneID)
 		}
 	}
 
-	// Remove Event from hand and move to Discard
-	p.Hand = append(p.Hand[:handIdx], p.Hand[handIdx+1:]...)
+	// Remove Event from hand (or discard) and move to Discard
+	if fromZone == ZoneHand {
+		p.Hand = append(p.Hand[:handIdx], p.Hand[handIdx+1:]...)
+	} else {
+		p.Discard = append(p.Discard[:discardIdx], p.Discard[discardIdx+1:]...)
+	}
 	card.Zone = ZoneDiscard
 	p.Discard = append(p.Discard, card)
 	g.PlaysRemaining--
@@ -477,7 +541,7 @@ func (g *GameState) PlayCard(playerID, cardInstanceID string, targetZone ZoneID)
 		CardInstanceID: card.InstanceID,
 		CardName:       card.Definition.Name,
 		CardDefinition: &defCopy,
-		FromZone:       ZoneHand,
+		FromZone:       fromZone,
 		ToZone:         ZoneDiscard,
 		BannerText:     fmt.Sprintf("✨ %s activa el efecto: %s", p.Name, card.Definition.Name),
 	})
@@ -496,6 +560,9 @@ func (g *GameState) PlayCard(playerID, cardInstanceID string, targetZone ZoneID)
 		}
 	}
 
+	// Also trigger any friendly board cards with TriggerOnEventPlayed (e.g. Germinador)
+	g.queueBoardTriggers(p, TriggerOnEventPlayed)
+
 	g.processEffectQueue(PhaseMain)
 	g.bumpVersion()
 	return nil
@@ -509,7 +576,7 @@ func (g *GameState) countMovableCitizens(p *PlayerState) int {
 	count := 0
 	for _, z := range []ZoneID{ZoneCity, ZoneRoad, ZoneCombat} {
 		for _, c := range p.Board[z] {
-			if !c.PlayedThisTurn && !c.MovedThisTurn {
+			if c.Definition.Type == CardTypeCitizen && !c.PlayedThisTurn && !c.MovedThisTurn {
 				count++
 			}
 		}
@@ -537,6 +604,9 @@ func (g *GameState) MoveCitizen(playerID, cardInstanceID string, toZone ZoneID) 
 	card, fromZone, pos := g.findBoardCard(p, cardInstanceID)
 	if card == nil {
 		return fmt.Errorf("el Ciudadano no se encuentra en tu tablero")
+	}
+	if card.Definition.Type == CardTypeTool {
+		return fmt.Errorf("las Herramientas (%s) no pueden moverse entre filas", card.Definition.Name)
 	}
 	if card.PlayedThisTurn {
 		return fmt.Errorf("no podés mover a %s porque fue jugado en este turno", card.Definition.Name)
@@ -612,6 +682,9 @@ func (g *GameState) AttackCitizen(playerID, attackerID, defenderID string) error
 	if attacker == nil || fromZone != ZoneCombat {
 		return fmt.Errorf("el atacante debe estar en tu Zona de Combate")
 	}
+	if attacker.Definition.Type == CardTypeTool {
+		return fmt.Errorf("las Herramientas (%s) no pueden atacar", attacker.Definition.Name)
+	}
 	if attacker.AttackedThisTurn {
 		return fmt.Errorf("%s ya atacó en este turno", attacker.Definition.Name)
 	}
@@ -625,7 +698,7 @@ func (g *GameState) AttackCitizen(playerID, attackerID, defenderID string) error
 		}
 	}
 	if !isValidTarget {
-		return fmt.Errorf("objetivo inválido: no podés atacar a una fila trasera mientras haya Ciudadanos en una fila intermedia")
+		return fmt.Errorf("objetivo inválido: no podés atacar a una fila trasera mientras haya unidades en una fila intermedia")
 	}
 
 	opp := g.Players[1-idx]
@@ -637,17 +710,20 @@ func (g *GameState) AttackCitizen(playerID, attackerID, defenderID string) error
 	atkDmg := attacker.AttackPower(g.Rules.VitalityMode)
 	defDmg := defender.AttackPower(g.Rules.VitalityMode)
 	attacker.AttackedThisTurn = true
-	defender.CurrentVitality -= atkDmg
+
+	actualAtkDmg, defShieldBroken := g.applyDamage(defender, atkDmg, attacker.Definition.Name)
 
 	var attackerDamage int
+	var atkShieldBroken bool
 	if g.Rules.RetaliationDamage && defDmg > 0 {
-		attacker.CurrentVitality -= defDmg
-		attackerDamage = -defDmg
+		var actualDefDmg int
+		actualDefDmg, atkShieldBroken = g.applyDamage(attacker, defDmg, defender.Definition.Name)
+		attackerDamage = -actualDefDmg
 		g.addLog(fmt.Sprintf("%s: %s atacó a %s en %s causando %d de daño y recibiendo %d de contraataque.",
-			p.Name, attacker.Definition.Name, defender.Definition.Name, zoneDisplayName(defZone), atkDmg, defDmg))
+			p.Name, attacker.Definition.Name, defender.Definition.Name, zoneDisplayName(defZone), actualAtkDmg, actualDefDmg))
 	} else {
 		g.addLog(fmt.Sprintf("%s: %s (%dV) atacó a %s en %s causando %d de daño.",
-			p.Name, attacker.Definition.Name, attacker.CurrentVitality, defender.Definition.Name, zoneDisplayName(defZone), atkDmg))
+			p.Name, attacker.Definition.Name, attacker.CurrentVitality, defender.Definition.Name, zoneDisplayName(defZone), actualAtkDmg))
 	}
 
 	var targetSnap *CardInstance
@@ -670,11 +746,17 @@ func (g *GameState) AttackCitizen(playerID, attackerID, defenderID string) error
 		g.addLog(fmt.Sprintf("%s cayó por el contraataque.", attacker.Definition.Name))
 	}
 
-	banner := fmt.Sprintf("⚔️ %s: %s ataca a %s (-%dV)", p.Name, attacker.Definition.Name, defender.Definition.Name, atkDmg)
-	if g.Rules.RetaliationDamage && defDmg > 0 {
-		banner = fmt.Sprintf("⚔️ %s: %s (-%dV) choca contra %s (-%dV)", p.Name, attacker.Definition.Name, defDmg, defender.Definition.Name, atkDmg)
+	banner := fmt.Sprintf("⚔️ %s: %s ataca a %s (-%dV)", p.Name, attacker.Definition.Name, defender.Definition.Name, actualAtkDmg)
+	if defShieldBroken {
+		banner = fmt.Sprintf("🛡️ %s: %s rompe el Escudo de %s (0 daño)", p.Name, attacker.Definition.Name, defender.Definition.Name)
+	} else if g.Rules.RetaliationDamage && defDmg > 0 {
+		if atkShieldBroken {
+			banner = fmt.Sprintf("⚔️ %s: %s (🛡️0) choca contra %s (-%dV)", p.Name, attacker.Definition.Name, defender.Definition.Name, actualAtkDmg)
+		} else {
+			banner = fmt.Sprintf("⚔️ %s: %s (%dV) choca contra %s (-%dV)", p.Name, attacker.Definition.Name, attackerDamage, defender.Definition.Name, actualAtkDmg)
+		}
 	} else if destroyed {
-		banner = fmt.Sprintf("⚔️ %s: %s ataca y destruye a %s (-%dV)", p.Name, attacker.Definition.Name, defender.Definition.Name, atkDmg)
+		banner = fmt.Sprintf("⚔️ %s: %s ataca y destruye a %s (-%dV)", p.Name, attacker.Definition.Name, defender.Definition.Name, actualAtkDmg)
 	}
 
 	g.recordAnimStep(ActionAnimationEvent{
@@ -688,7 +770,7 @@ func (g *GameState) AttackCitizen(playerID, attackerID, defenderID string) error
 		TargetCardID:         defender.InstanceID,
 		TargetCardName:       defender.Definition.Name,
 		TargetCardSnapshot:   targetSnap,
-		Amount:               -atkDmg,
+		Amount:               -actualAtkDmg,
 		Destroyed:            destroyed,
 		AttackerDamage:       attackerDamage,
 		AttackerDestroyed:    attackerDestroyed,
@@ -696,8 +778,25 @@ func (g *GameState) AttackCitizen(playerID, attackerID, defenderID string) error
 		BannerText:           banner,
 	})
 
+	if len(g.EffectQueue) > 0 {
+		g.processEffectQueue(PhaseMain)
+	}
+
 	g.bumpVersion()
 	return nil
+}
+
+func (g *GameState) applyDamage(target *CardInstance, dmg int, sourceDesc string) (actualDmg int, shieldBroken bool) {
+	if dmg <= 0 || target == nil {
+		return 0, false
+	}
+	if target.ShieldActive {
+		target.ShieldActive = false
+		g.addLog(fmt.Sprintf("🛡️ El Escudo de %s evitó %d de daño de %s y se perdió.", target.Definition.Name, dmg, sourceDesc))
+		return 0, true
+	}
+	target.CurrentVitality -= dmg
+	return dmg, false
 }
 
 // SubmitPromptTarget resolves a PendingPrompt during PhaseAwaitingInput.
@@ -858,6 +957,11 @@ func (g *GameState) executeEffectStepWithTarget(qe QueuedEffect, chosenTargetID 
 			tokenDef.Name = "Recluta"
 		}
 
+		totalCount := tokenDef.Count
+		if tokenDef.BonusCountIfEnemyMorePoints > 0 && opp != nil && opp.DevelopmentPoints > controller.DevelopmentPoints {
+			totalCount += tokenDef.BonusCountIfEnemyMorePoints
+		}
+
 		destZone := step.DestZone
 		if destZone == ZoneSameRow || destZone == "" {
 			// Check if source card is still on board; otherwise use its recorded SourceZone
@@ -870,8 +974,13 @@ func (g *GameState) executeEffectStepWithTarget(qe QueuedEffect, chosenTargetID 
 			}
 		}
 
+		tokenDesc := tokenDef.Description
+		if tokenDesc == "" {
+			tokenDesc = "Token Ciudadano invocado."
+		}
+
 		var lastTokenID string
-		for i := 0; i < tokenDef.Count; i++ {
+		for i := 0; i < totalCount; i++ {
 			inst := &CardInstance{
 				InstanceID: g.nextInstanceID("token"),
 				OwnerID:    controller.ID,
@@ -880,7 +989,9 @@ func (g *GameState) executeEffectStepWithTarget(qe QueuedEffect, chosenTargetID 
 					Name:        tokenDef.Name,
 					Type:        CardTypeCitizen,
 					Vitality:    tokenDef.Vitality,
-					Description: "Token Ciudadano invocado.",
+					Description: tokenDesc,
+					Abilities:   tokenDef.Abilities,
+					HasShield:   tokenDef.HasShield,
 					IsToken:     true,
 					ArtColor:    "#64748b",
 					ArtIcon:     tokenDef.ArtIcon,
@@ -890,11 +1001,12 @@ func (g *GameState) executeEffectStepWithTarget(qe QueuedEffect, chosenTargetID 
 				Zone:             destZone,
 				PlayedThisTurn:   true,
 				AttackedThisTurn: false,
+				ShieldActive:     tokenDef.HasShield,
 			}
 			lastTokenID = inst.InstanceID
 			controller.Board[destZone] = append(controller.Board[destZone], inst)
 		}
-		g.addLog(fmt.Sprintf("%s invocó %d %s (%dV) en %s.", controller.Name, tokenDef.Count, tokenDef.Name, tokenDef.Vitality, zoneDisplayName(destZone)))
+		g.addLog(fmt.Sprintf("%s invocó %d %s (%dV) en %s.", controller.Name, totalCount, tokenDef.Name, tokenDef.Vitality, zoneDisplayName(destZone)))
 		g.recordAnimStep(ActionAnimationEvent{
 			Type:           AnimEffect,
 			ActorID:        controller.ID,
@@ -902,7 +1014,7 @@ func (g *GameState) executeEffectStepWithTarget(qe QueuedEffect, chosenTargetID 
 			CardInstanceID: lastTokenID,
 			CardName:       tokenDef.Name,
 			ToZone:         destZone,
-			BannerText:     fmt.Sprintf("✨ %s invoca %d %s (%dV) en %s", qe.SourceCardName, tokenDef.Count, tokenDef.Name, tokenDef.Vitality, zoneDisplayName(destZone)),
+			BannerText:     fmt.Sprintf("✨ %s invoca %d %s (%dV) en %s", qe.SourceCardName, totalCount, tokenDef.Name, tokenDef.Vitality, zoneDisplayName(destZone)),
 		})
 
 	case EffectDrawCards:
@@ -912,6 +1024,97 @@ func (g *GameState) executeEffectStepWithTarget(qe QueuedEffect, chosenTargetID 
 		}
 		drawn := g.drawCards(controller, amount)
 		g.addLog(fmt.Sprintf("%s (%s): levantó %d carta(s).", qe.SourceCardName, controller.Name, drawn))
+
+	case EffectDiscard:
+		targets := g.resolveTargetsForExecution(qe, chosenTargetID)
+		for _, t := range targets {
+			ownerPlayer, _, _ := g.GetPlayer(t.OwnerID)
+			if ownerPlayer == nil {
+				continue
+			}
+			g.discardCardFromHand(ownerPlayer, t.InstanceID, qe.SourceCardName)
+		}
+
+	case EffectSummonSelf:
+		destZone := step.DestZone
+		if !IsBoardZone(destZone) {
+			destZone = ZoneRoad
+		}
+		// Find the source card in controller's Discard (or anywhere off-board)
+		var selfCard *CardInstance
+		for i, c := range controller.Discard {
+			if c.InstanceID == qe.SourceCardID {
+				selfCard = c
+				controller.Discard = append(controller.Discard[:i], controller.Discard[i+1:]...)
+				break
+			}
+		}
+		if selfCard != nil {
+			selfCard.OwnerID = controller.ID
+			selfCard.Zone = destZone
+			selfCard.BaseVitality = selfCard.Definition.Vitality
+			selfCard.CurrentVitality = selfCard.Definition.Vitality
+			selfCard.PlayedThisTurn = true
+			selfCard.MovedThisTurn = false
+			selfCard.AttackedThisTurn = false
+			selfCard.ShieldActive = selfCard.Definition.HasShield
+			controller.Board[destZone] = append(controller.Board[destZone], selfCard)
+
+			g.addLog(fmt.Sprintf("✨ %s (%s) se convocó desde el Descarte a %s (%dV).", selfCard.Definition.Name, controller.Name, zoneDisplayName(destZone), selfCard.CurrentVitality))
+			g.recordAnimStep(ActionAnimationEvent{
+				Type:           AnimEffect,
+				ActorID:        controller.ID,
+				ActorName:      controller.Name,
+				CardInstanceID: selfCard.InstanceID,
+				CardName:       selfCard.Definition.Name,
+				FromZone:       ZoneDiscard,
+				ToZone:         destZone,
+				BannerText:     fmt.Sprintf("✨ %s salta del Descarte hacia %s", selfCard.Definition.Name, zoneDisplayName(destZone)),
+			})
+		}
+
+	case EffectMillOrSacrifice:
+		reqCount := step.Amount
+		if reqCount <= 0 {
+			reqCount = 3
+		}
+		if len(controller.Discard) >= reqCount {
+			milled := controller.Discard[:reqCount]
+			controller.Discard = append([]*CardInstance{}, controller.Discard[reqCount:]...)
+			for _, mc := range milled {
+				mc.Zone = ZoneExile
+				controller.Exile = append(controller.Exile, mc)
+			}
+			g.addLog(fmt.Sprintf("⚙️ %s (%s) trituró %d carta(s) de su Descarte al Exilio.", qe.SourceCardName, controller.Name, reqCount))
+			g.recordAnimStep(ActionAnimationEvent{
+				Type:           AnimEffect,
+				ActorID:        controller.ID,
+				ActorName:      controller.Name,
+				CardInstanceID: qe.SourceCardID,
+				CardName:       qe.SourceCardName,
+				ToZone:         ZoneExile,
+				BannerText:     fmt.Sprintf("⚙️ %s tritura %d cartas del Descarte", qe.SourceCardName, reqCount),
+			})
+		} else {
+			if srcCard, _, _ := g.findBoardCard(controller, qe.SourceCardID); srcCard != nil {
+				cp := srcCard.Clone()
+				cp.CurrentVitality = 0
+				g.destroyBoardCard(controller, srcCard.InstanceID)
+				g.addLog(fmt.Sprintf("💀 %s (%s) no tenía %d cartas en su Descarte para triturar y fue sacrificado.", qe.SourceCardName, controller.Name, reqCount))
+				g.recordAnimStep(ActionAnimationEvent{
+					Type:               AnimEffect,
+					ActorID:            controller.ID,
+					ActorName:          controller.Name,
+					CardInstanceID:     srcCard.InstanceID,
+					CardName:           srcCard.Definition.Name,
+					TargetCardID:       srcCard.InstanceID,
+					TargetCardName:     srcCard.Definition.Name,
+					TargetCardSnapshot: &cp,
+					Destroyed:          true,
+					BannerText:         fmt.Sprintf("💀 %s se sacrifica (faltan cartas en Descarte)", srcCard.Definition.Name),
+				})
+			}
+		}
 
 	case EffectDealDamage:
 		dmg := step.Amount
@@ -924,8 +1127,10 @@ func (g *GameState) executeEffectStepWithTarget(qe QueuedEffect, chosenTargetID 
 			if ownerPlayer == nil {
 				continue
 			}
-			t.CurrentVitality -= dmg
-			g.addLog(fmt.Sprintf("%s (%s) hizo %d de daño a %s.", qe.SourceCardName, controller.Name, dmg, t.Definition.Name))
+			actualDmg, shieldBroken := g.applyDamage(t, dmg, qe.SourceCardName)
+			if !shieldBroken {
+				g.addLog(fmt.Sprintf("%s (%s) hizo %d de daño a %s.", qe.SourceCardName, controller.Name, actualDmg, t.Definition.Name))
+			}
 			var targetSnap *CardInstance
 			destroyed := t.CurrentVitality <= 0
 			if destroyed {
@@ -934,6 +1139,10 @@ func (g *GameState) executeEffectStepWithTarget(qe QueuedEffect, chosenTargetID 
 				targetSnap = &cp
 				g.destroyBoardCard(ownerPlayer, t.InstanceID)
 				g.addLog(fmt.Sprintf("%s fue destruido.", t.Definition.Name))
+			}
+			banner := fmt.Sprintf("🔥 %s (%s) inflige -%dV a %s", qe.SourceCardName, controller.Name, actualDmg, t.Definition.Name)
+			if shieldBroken {
+				banner = fmt.Sprintf("🛡️ %s absorbe el daño de %s con su Escudo", t.Definition.Name, qe.SourceCardName)
 			}
 			g.recordAnimStep(ActionAnimationEvent{
 				Type:               AnimEffect,
@@ -944,9 +1153,9 @@ func (g *GameState) executeEffectStepWithTarget(qe QueuedEffect, chosenTargetID 
 				TargetCardID:       t.InstanceID,
 				TargetCardName:     t.Definition.Name,
 				TargetCardSnapshot: targetSnap,
-				Amount:             -dmg,
+				Amount:             -actualDmg,
 				Destroyed:          destroyed,
-				BannerText:         fmt.Sprintf("🔥 %s (%s) inflige -%dV a %s", qe.SourceCardName, controller.Name, dmg, t.Definition.Name),
+				BannerText:         banner,
 			})
 		}
 
@@ -1060,6 +1269,24 @@ func (g *GameState) resolveTargetsForExecution(qe QueuedEffect, chosenTargetID s
 			return []*CardInstance{c}
 		}
 		return nil
+	case TargetReqRightNeighbor:
+		for _, p := range g.Players {
+			if p == nil {
+				continue
+			}
+			if srcCard, zone, pos := g.findBoardCard(p, qe.SourceCardID); srcCard != nil {
+				row := p.Board[zone]
+				for i := pos + 1; i < len(row); i++ {
+					cand := row[i]
+					if qe.Step.Target.CardType != "" && cand.Definition.Type != qe.Step.Target.CardType {
+						continue
+					}
+					return []*CardInstance{cand}
+				}
+				return nil
+			}
+		}
+		return nil
 	case TargetReqAllMatching:
 		return g.findCandidateTargets(qe.ControllerID, qe.SourceCardID, qe.Step.Target)
 	default:
@@ -1163,13 +1390,83 @@ func (g *GameState) destroyBoardCard(p *PlayerState, instanceID string) {
 	row := p.Board[zone]
 	p.Board[zone] = append(row[:pos], row[pos+1:]...)
 
-	// Reset card vitality when leaving the board; tokens do not go to discard pile or can go to discard
+	// Reset card vitality when leaving the board; tokens do not go to discard pile
 	card.CurrentVitality = card.BaseVitality
 	card.PlayedThisTurn = false
+	card.MovedThisTurn = false
 	card.AttackedThisTurn = false
+	card.ShieldActive = false
 	if !card.Definition.IsToken {
 		card.Zone = ZoneDiscard
 		p.Discard = append(p.Discard, card)
+	}
+
+	// Queue "Último deseo" (on_death) abilities when destroyed on the board
+	for _, ab := range card.Definition.Abilities {
+		if ab.Trigger == TriggerOnDeath {
+			for _, step := range ab.Steps {
+				g.EffectQueue = append(g.EffectQueue, QueuedEffect{
+					ControllerID:   p.ID,
+					SourceCardID:   card.InstanceID,
+					SourceCardName: card.Definition.Name,
+					SourceZone:     zone,
+					Step:           step,
+				})
+			}
+		}
+	}
+}
+
+func (g *GameState) discardCardFromHand(p *PlayerState, instanceID string, sourceName string) {
+	handIdx := -1
+	var card *CardInstance
+	for i, c := range p.Hand {
+		if c.InstanceID == instanceID {
+			handIdx = i
+			card = c
+			break
+		}
+	}
+	if card == nil {
+		return
+	}
+
+	p.Hand = append(p.Hand[:handIdx], p.Hand[handIdx+1:]...)
+	card.Zone = ZoneDiscard
+	card.CurrentVitality = card.BaseVitality
+	card.PlayedThisTurn = false
+	card.MovedThisTurn = false
+	card.AttackedThisTurn = false
+	card.ShieldActive = false
+	if !card.Definition.IsToken {
+		p.Discard = append(p.Discard, card)
+	}
+
+	g.addLog(fmt.Sprintf("%s (%s) descartó a %s.", sourceName, p.Name, card.Definition.Name))
+	g.recordAnimStep(ActionAnimationEvent{
+		Type:           AnimEffect,
+		ActorID:        p.ID,
+		ActorName:      p.Name,
+		CardInstanceID: card.InstanceID,
+		CardName:       card.Definition.Name,
+		FromZone:       ZoneHand,
+		ToZone:         ZoneDiscard,
+		BannerText:     fmt.Sprintf("🗑️ %s descarta a %s", p.Name, card.Definition.Name),
+	})
+
+	// Trigger "Cuando descartas esta carta" (on_discard) abilities on the discarded card
+	for _, ab := range card.Definition.Abilities {
+		if ab.Trigger == TriggerOnDiscard {
+			for _, step := range ab.Steps {
+				g.EffectQueue = append(g.EffectQueue, QueuedEffect{
+					ControllerID:   p.ID,
+					SourceCardID:   card.InstanceID,
+					SourceCardName: card.Definition.Name,
+					SourceZone:     ZoneDiscard,
+					Step:           step,
+				})
+			}
+		}
 	}
 }
 
@@ -1230,6 +1527,7 @@ func (g *GameState) moveCardToZone(p *PlayerState, instanceID string, dest ZoneI
 		}
 	case ZoneCity, ZoneRoad, ZoneCombat:
 		card.PlayedThisTurn = true
+		card.ShieldActive = card.Definition.HasShield
 		p.Board[dest] = append(p.Board[dest], card)
 	}
 }

@@ -24,10 +24,15 @@ type CardInstance struct {
 	PlayedThisTurn   bool           `json:"playedThisTurn"`
 	MovedThisTurn    bool           `json:"movedThisTurn"`
 	AttackedThisTurn bool           `json:"attackedThisTurn"`
+	ShieldActive     bool           `json:"shieldActive"`
 }
 
 // AttackPower returns the damage this Citizen deals when attacking under the given VitalityMode.
+// Tools (Herramientas) have 0 attack power.
 func (c *CardInstance) AttackPower(mode VitalityMode) int {
+	if c.Definition.Type == CardTypeTool {
+		return 0
+	}
 	if mode == VitalityModeBaseAttack {
 		return c.BaseVitality
 	}

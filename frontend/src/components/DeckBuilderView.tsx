@@ -53,7 +53,9 @@ export const DeckBuilderView: React.FC = () => {
   const [showConstraintsPanel, setShowConstraintsPanel] = useState(false);
   const [showCardModal, setShowCardModal] = useState(false);
   const [showPrintModal, setShowPrintModal] = useState(false);
-  const [filterType, setFilterType] = useState<'all' | 'citizen' | 'event' | 'custom'>('all');
+  const [filterType, setFilterType] = useState<
+    'all' | 'citizen' | 'tool' | 'event' | 'custom'
+  >('all');
 
   // Share Code (Export / Import) Studio State
   const [showShareModal, setShowShareModal] = useState(false);
@@ -106,6 +108,7 @@ export const DeckBuilderView: React.FC = () => {
   const filteredCards = useMemo(() => {
     return cards.filter((c) => {
       if (filterType === 'citizen') return c.type === 'citizen';
+      if (filterType === 'tool') return c.type === 'tool';
       if (filterType === 'event') return c.type === 'event';
       if (filterType === 'custom') return Boolean(c.isCustom);
       return true;
@@ -319,6 +322,7 @@ export const DeckBuilderView: React.FC = () => {
             [
               { id: 'all', label: 'Todas las Cartas' },
               { id: 'citizen', label: 'Ciudadanos' },
+              { id: 'tool', label: 'Herramientas' },
               { id: 'event', label: 'Eventos' },
               { id: 'custom', label: 'Forjadas (Custom)' },
             ] as const

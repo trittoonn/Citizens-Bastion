@@ -118,8 +118,8 @@ func (g *GameState) takeAIMainPhaseStep(ai, human *PlayerState, diff AIDifficult
 		return true
 	}
 
-	// Step C: Play a card from Hand if plays remain
-	if g.PlaysRemaining > 0 && len(ai.Hand) > 0 {
+	// Step C: Play a card from Hand (or playable from Discard) if plays remain
+	if g.PlaysRemaining > 0 {
 		// On Easy difficulty, if AI already played at least 1 card this turn, 35% chance to stop playing early
 		if diff == AIDifficultyEasy && g.PlaysRemaining < g.Rules.MaxPlaysPerTurn && rand.Intn(100) < 35 {
 			return false
@@ -200,7 +200,7 @@ func (g *GameState) tryAIAttack(ai, human *PlayerState, diff AIDifficulty) bool 
 
 	var readyAttackers []*CardInstance
 	for _, c := range ai.Board[ZoneCombat] {
-		if !c.AttackedThisTurn {
+		if c.Definition.Type == CardTypeCitizen && !c.AttackedThisTurn {
 			readyAttackers = append(readyAttackers, c)
 		}
 	}
@@ -277,24 +277,74 @@ func (g *GameState) tryAIPlayCard(ai, human *PlayerState, diff AIDifficulty) boo
 	canCombat := g.CanPlayInCombat(ai.ID)
 	var options []scoredPlay
 
-	for _, c := range ai.Hand {
-		if c.Definition.Type == CardTypeCitizen {
+	candidates := append([]*CardInstance{}, ai.Hand...)
+	for _, dc := range ai.Discard {
+		if dc.Definition.PlayFromDiscard {
+			candidates = append(candidates, dc)
+		}
+	}
+
+	for _, c := range candidates {
+		if c.Definition.Type == CardTypeCitizen || c.Definition.Type == CardTypeTool {
+			// If it's Demoledor de basura (mill_or_sacrifice), only play if we have enough cards in Discard to mill
+			requiresMill := 0
+			for _, ab := range c.Definition.Abilities {
+				for _, st := range ab.Steps {
+					if st.Op == EffectMillOrSacrifice {
+						requiresMill = st.Amount
+						if requiresMill <= 0 {
+							requiresMill = 3
+						}
+					}
+				}
+			}
+			if requiresMill > 0 {
+				availDiscard := len(ai.Discard)
+				if c.Zone == ZoneDiscard {
+					availDiscard-- // Playing itself from discard removes 1 card from discard
+				}
+				if availDiscard < requiresMill {
+					continue
+				}
+			}
+
+			if c.Definition.IsSpy {
+				// Spy (e.g. Asesino): only play if human has a high-value Citizen at index 0 of some row
+				var bestSpyZone ZoneID
+				bestVictimVal := 0
+				for _, z := range []ZoneID{ZoneCombat, ZoneRoad, ZoneCity} {
+					if len(human.Board[z]) > 0 {
+						victim := human.Board[z][0]
+						if victim.CurrentVitality > bestVictimVal {
+							bestVictimVal = victim.CurrentVitality
+							bestSpyZone = z
+						}
+					}
+				}
+				if bestVictimVal >= 4 {
+					options = append(options, scoredPlay{card: c, zone: bestSpyZone, score: bestVictimVal * 15})
+				}
+				continue
+			}
+
 			score := c.Definition.Vitality * 10
 			for _, ab := range c.Definition.Abilities {
-				if ab.Trigger == TriggerOnPlay || ab.Trigger == TriggerTurnEnd || ab.Trigger == TriggerTurnStart {
+				if ab.Trigger == TriggerOnPlay || ab.Trigger == TriggerTurnEnd || ab.Trigger == TriggerTurnStart || ab.Trigger == TriggerOnDeath || ab.Trigger == TriggerOnEventPlayed {
 					score += 35
 				}
 			}
 
 			// Determine best zone based on difficulty and card role
 			targetZone := ZoneRoad
-			if diff == AIDifficultyEasy {
+			if c.Definition.Type == CardTypeTool {
+				targetZone = ZoneCity
+			} else if diff == AIDifficultyEasy {
 				targetZone = ZoneCity
 				if rand.Intn(100) < 40 {
 					targetZone = ZoneRoad
 				}
 			} else {
-				isBacklineEngine := c.Definition.ID == "reclutador" || c.Definition.ID == "mago_de_las_tormentas" || c.Definition.Vitality <= 4
+				isBacklineEngine := c.Definition.ID == "reclutador" || c.Definition.ID == "granjero" || c.Definition.ID == "mago_de_las_tormentas" || c.Definition.ID == "germinador" || c.Definition.Vitality <= 4
 				if isBacklineEngine {
 					targetZone = ZoneCity
 				} else if canCombat && c.Definition.Vitality >= 6 {
@@ -467,7 +517,29 @@ func (g *GameState) chooseAIPromptTarget(ai, human *PlayerState, prompt *Pending
 		}
 	}
 
-	// 3. If searching Deck or returning from Discard to Hand: pick highest Vitality Citizen
+	// 3. If discarding a card from hand (EffectDiscard): prefer a card with TriggerOnDiscard (e.g. Nadador de basura) or lowest Vitality
+	if step.Op == EffectDiscard {
+		var lowest *CardInstance
+		for _, id := range prompt.ValidTargetIDs {
+			c := g.findCardAnywhere(id)
+			if c == nil {
+				continue
+			}
+			for _, ab := range c.Definition.Abilities {
+				if ab.Trigger == TriggerOnDiscard {
+					return c.InstanceID
+				}
+			}
+			if lowest == nil || c.Definition.Vitality < lowest.Definition.Vitality {
+				lowest = c
+			}
+		}
+		if lowest != nil {
+			return lowest.InstanceID
+		}
+	}
+
+	// 4. If searching Deck or returning from Discard to Hand: pick highest Vitality Citizen
 	if step.Op == EffectMoveZone && step.DestZone == ZoneHand {
 		var best *CardInstance
 		for _, id := range prompt.ValidTargetIDs {

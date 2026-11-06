@@ -428,8 +428,18 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
   );
 
   const selectedHandCard = useMemo(
-    () => view.you.hand?.find((c) => c.instanceId === selectedHandCardId) || null,
-    [view.you.hand, selectedHandCardId]
+    () =>
+      view.you.hand?.find((c) => c.instanceId === selectedHandCardId) ||
+      view.you.discard?.find(
+        (c) => c.instanceId === selectedHandCardId && c.definition.playFromDiscard
+      ) ||
+      null,
+    [view.you.hand, view.you.discard, selectedHandCardId]
+  );
+
+  const playableFromDiscardCards = useMemo(
+    () => (view.you.discard || []).filter((c) => c.definition.playFromDiscard),
+    [view.you.discard]
   );
 
   const selectedBoardCard = useMemo(() => {
@@ -450,7 +460,12 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
   const isOffBoardPrompt = useMemo(() => {
     if (!isPromptForMe || !view.pendingPrompt) return false;
     const zones = view.pendingPrompt.targetZones || [];
-    return zones.includes('deck') || zones.includes('discard') || zones.includes('exile');
+    return (
+      zones.includes('deck') ||
+      zones.includes('discard') ||
+      zones.includes('exile') ||
+      zones.includes('hand')
+    );
   }, [isPromptForMe, view.pendingPrompt]);
 
   const validPromptSet = useMemo(
@@ -467,6 +482,7 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
     view.phase === 'MAIN' &&
     view.isYourTurn &&
     selectedBoardCard &&
+    selectedBoardCard.definition.type === 'citizen' &&
     selectedBoardCard.zone === 'combat' &&
     !selectedBoardCard.attackedThisTurn;
 
@@ -476,9 +492,13 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
       !view.isYourTurn ||
       view.playsRemaining <= 0 ||
       !selectedHandCard ||
-      selectedHandCard.definition.type !== 'citizen'
+      (selectedHandCard.definition.type !== 'citizen' &&
+        selectedHandCard.definition.type !== 'tool')
     ) {
       return false;
+    }
+    if (selectedHandCard.definition.isSpy) {
+      return true;
     }
     if (zone === 'combat') {
       return view.canPlayInCombatZone;
@@ -491,6 +511,7 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
       view.phase !== 'MAIN' ||
       !view.isYourTurn ||
       !selectedBoardCard ||
+      selectedBoardCard.definition.type !== 'citizen' ||
       selectedBoardCard.playedThisTurn ||
       selectedBoardCard.movedThisTurn
     ) {
@@ -779,13 +800,27 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
                   !isAnimatingMultiStep &&
                   Boolean(canSelectedBoardCardAttack) &&
                   rawCards.some((c) => validCombatSet.has(c.instanceId));
+                const canPlaySpyHere =
+                  !isAnimatingMultiStep &&
+                  Boolean(selectedHandCard?.definition.isSpy) &&
+                  canPlaySelectedCitizenInZone(zone.id);
 
                 return (
                   <div
                     key={zone.id}
+                    onClick={() => {
+                      if (isAnimatingMultiStep) return;
+                      if (canPlaySpyHere && selectedHandCard) {
+                        sendAction({
+                          type: 'PLAY_CARD',
+                          cardInstanceId: selectedHandCard.instanceId,
+                          targetZone: zone.id,
+                        });
+                      }
+                    }}
                     className={`min-h-0 rounded px-3 flex items-center justify-between gap-2 relative transition ${getZoneSurfaceClasses(
                       zone.id,
-                      isClosestAttackRow
+                      isClosestAttackRow || canPlaySpyHere
                     )}`}
                   >
                     {/* Centered Background Watermark SVG (Clipped strictly inside the rounded row background) */}
@@ -850,11 +885,15 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
                     </div>
 
                     <div className="w-28 shrink-0 text-right relative z-10">
-                      {isClosestAttackRow && (
+                      {canPlaySpyHere ? (
+                        <span className="btn-war-gold px-2 py-0.5 rounded text-[10px]">
+                          🗡️ Infiltrar aquí
+                        </span>
+                      ) : isClosestAttackRow ? (
                         <span className="font-display text-[10px] font-bold text-[#fca5a5] animate-pulse">
                           ⚔️ Al alcance
                         </span>
-                      )}
+                      ) : null}
                     </div>
                   </div>
                 );
@@ -1150,6 +1189,13 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
                       onMouseLeave={() => setHoveredCard(null)}
                       onClick={() => {
                         if (isAnimatingMultiStep) return;
+                        if (isPromptForMe && validPromptSet.has(inst.instanceId)) {
+                          sendAction({
+                            type: 'SELECT_TARGET',
+                            targetCardId: inst.instanceId,
+                          });
+                          return;
+                        }
                         if (view.phase === 'MULLIGAN' && !view.you.mulliganDone) {
                           toggleMulliganCard(inst.instanceId);
                           return;
@@ -1217,10 +1263,13 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
                   </button>
                 </>
               ) : selectedHandCard &&
-                selectedHandCard.definition.type === 'citizen' ? (
+                (selectedHandCard.definition.type === 'citizen' ||
+                  selectedHandCard.definition.type === 'tool') ? (
                 <>
                   <span className="font-display text-[10px] font-bold text-[#f3d46b] text-right leading-tight">
-                    ↗ Hacé clic en una fila resaltada para desplegar
+                    {selectedHandCard.definition.isSpy
+                      ? '🗡️ Hacé clic en una fila enemiga para infiltrar al Espía'
+                      : '↗ Hacé clic en una fila resaltada para desplegar'}
                   </span>
                   <button
                     type="button"
@@ -1244,16 +1293,33 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
                   </button>
                 </>
               ) : (
-                <div className="text-right font-serif text-[11px] text-[#8c7e70] leading-snug">
-                  Jugadas disp.:{' '}
-                  <strong className="font-display text-[#f3d46b]">
-                    {view.playsRemaining}
-                  </strong>
-                  <br />
-                  Unidades para marchar:{' '}
-                  <strong className="font-display text-[#f3d46b]">
-                    {view.movesRemaining}
-                  </strong>
+                <div className="text-right font-serif text-[11px] text-[#8c7e70] leading-snug space-y-1">
+                  <div>
+                    Jugadas disp.:{' '}
+                    <strong className="font-display text-[#f3d46b]">
+                      {view.playsRemaining}
+                    </strong>
+                    <br />
+                    Unidades para marchar:{' '}
+                    <strong className="font-display text-[#f3d46b]">
+                      {view.movesRemaining}
+                    </strong>
+                  </div>
+                  {playableFromDiscardCards.length > 0 &&
+                    view.phase === 'MAIN' &&
+                    view.isYourTurn &&
+                    view.playsRemaining > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedBoardCardId(null);
+                          setSelectedHandCardId(playableFromDiscardCards[0].instanceId);
+                        }}
+                        className="w-full px-2 py-1 rounded bg-[#14532d] hover:bg-[#166534] border border-[#4ade80] font-display text-[9.5px] font-bold text-[#dcfce7] shadow"
+                      >
+                        ♻️ Jugar {playableFromDiscardCards[0].definition.name} (Descarte)
+                      </button>
+                    )}
                 </div>
               )}
             </div>
@@ -1614,11 +1680,39 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
               </p>
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 max-h-[60vh] overflow-y-auto p-2">
-                {inspectPile.cards.map((c) => (
-                  <div key={c.instanceId} className="flex justify-center">
-                    <CardView card={c.definition} instance={c} size="md" />
-                  </div>
-                ))}
+                {inspectPile.cards.map((c) => {
+                  const canPlayFromDiscard =
+                    c.definition.playFromDiscard &&
+                    inspectPile.title === 'Tu Pila de Descarte' &&
+                    view.phase === 'MAIN' &&
+                    view.isYourTurn &&
+                    view.playsRemaining > 0;
+                  return (
+                    <div key={c.instanceId} className="flex justify-center">
+                      <CardView
+                        card={c.definition}
+                        instance={c}
+                        size="md"
+                        onClick={
+                          canPlayFromDiscard
+                            ? () => {
+                                setSelectedBoardCardId(null);
+                                setSelectedHandCardId(c.instanceId);
+                                setInspectPile(null);
+                              }
+                            : undefined
+                        }
+                        footerAction={
+                          canPlayFromDiscard ? (
+                            <div className="btn-war-gold text-[10px] text-center py-1 rounded-sm">
+                              ♻️ Jugar desde Descarte
+                            </div>
+                          ) : undefined
+                        }
+                      />
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
