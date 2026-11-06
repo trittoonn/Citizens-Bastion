@@ -465,7 +465,7 @@ func (g *GameState) PlayCard(playerID, cardInstanceID string, targetZone ZoneID)
 		CardDefinition: &defCopy,
 		FromZone:       ZoneHand,
 		ToZone:         ZoneDiscard,
-		BannerText:     fmt.Sprintf("📜 %s ejecuta el decreto: %s", p.Name, card.Definition.Name),
+		BannerText:     fmt.Sprintf("✨ %s activa el efecto: %s", p.Name, card.Definition.Name),
 	})
 
 	for _, ab := range card.Definition.Abilities {
@@ -602,12 +602,21 @@ func (g *GameState) AttackCitizen(playerID, attackerID, defenderID string) error
 		return fmt.Errorf("el objetivo no se encuentra en el tablero enemigo")
 	}
 
-	dmg := attacker.AttackPower(g.Rules.VitalityMode)
+	atkDmg := attacker.AttackPower(g.Rules.VitalityMode)
+	defDmg := defender.AttackPower(g.Rules.VitalityMode)
 	attacker.AttackedThisTurn = true
-	defender.CurrentVitality -= dmg
+	defender.CurrentVitality -= atkDmg
 
-	g.addLog(fmt.Sprintf("%s: %s (%dV) atacó a %s en %s causando %d de daño.",
-		p.Name, attacker.Definition.Name, attacker.CurrentVitality, defender.Definition.Name, zoneDisplayName(defZone), dmg))
+	var attackerDamage int
+	if g.Rules.RetaliationDamage && defDmg > 0 {
+		attacker.CurrentVitality -= defDmg
+		attackerDamage = -defDmg
+		g.addLog(fmt.Sprintf("%s: %s atacó a %s en %s causando %d de daño y recibiendo %d de contraataque.",
+			p.Name, attacker.Definition.Name, defender.Definition.Name, zoneDisplayName(defZone), atkDmg, defDmg))
+	} else {
+		g.addLog(fmt.Sprintf("%s: %s (%dV) atacó a %s en %s causando %d de daño.",
+			p.Name, attacker.Definition.Name, attacker.CurrentVitality, defender.Definition.Name, zoneDisplayName(defZone), atkDmg))
+	}
 
 	var targetSnap *CardInstance
 	destroyed := defender.CurrentVitality <= 0
@@ -619,24 +628,40 @@ func (g *GameState) AttackCitizen(playerID, attackerID, defenderID string) error
 		g.addLog(fmt.Sprintf("%s fue destruido.", defender.Definition.Name))
 	}
 
-	banner := fmt.Sprintf("⚔️ %s: %s ataca a %s (-%dV)", p.Name, attacker.Definition.Name, defender.Definition.Name, dmg)
-	if destroyed {
-		banner = fmt.Sprintf("⚔️ %s: %s ataca y destruye a %s (-%dV)", p.Name, attacker.Definition.Name, defender.Definition.Name, dmg)
+	var attackerSnap *CardInstance
+	attackerDestroyed := g.Rules.RetaliationDamage && attacker.CurrentVitality <= 0
+	if attackerDestroyed {
+		cp := attacker.Clone()
+		cp.CurrentVitality = 0
+		attackerSnap = &cp
+		g.destroyBoardCard(p, attacker.InstanceID)
+		g.addLog(fmt.Sprintf("%s cayó por el contraataque.", attacker.Definition.Name))
 	}
+
+	banner := fmt.Sprintf("⚔️ %s: %s ataca a %s (-%dV)", p.Name, attacker.Definition.Name, defender.Definition.Name, atkDmg)
+	if g.Rules.RetaliationDamage && defDmg > 0 {
+		banner = fmt.Sprintf("⚔️ %s: %s (-%dV) choca contra %s (-%dV)", p.Name, attacker.Definition.Name, defDmg, defender.Definition.Name, atkDmg)
+	} else if destroyed {
+		banner = fmt.Sprintf("⚔️ %s: %s ataca y destruye a %s (-%dV)", p.Name, attacker.Definition.Name, defender.Definition.Name, atkDmg)
+	}
+
 	g.recordAnimStep(ActionAnimationEvent{
-		Type:               AnimAttack,
-		ActorID:            p.ID,
-		ActorName:          p.Name,
-		CardInstanceID:     attacker.InstanceID,
-		CardName:           attacker.Definition.Name,
-		FromZone:           ZoneCombat,
-		ToZone:             defZone,
-		TargetCardID:       defender.InstanceID,
-		TargetCardName:     defender.Definition.Name,
-		TargetCardSnapshot: targetSnap,
-		Amount:             -dmg,
-		Destroyed:          destroyed,
-		BannerText:         banner,
+		Type:                 AnimAttack,
+		ActorID:              p.ID,
+		ActorName:            p.Name,
+		CardInstanceID:       attacker.InstanceID,
+		CardName:             attacker.Definition.Name,
+		FromZone:             ZoneCombat,
+		ToZone:               defZone,
+		TargetCardID:         defender.InstanceID,
+		TargetCardName:       defender.Definition.Name,
+		TargetCardSnapshot:   targetSnap,
+		Amount:               -atkDmg,
+		Destroyed:            destroyed,
+		AttackerDamage:       attackerDamage,
+		AttackerDestroyed:    attackerDestroyed,
+		AttackerCardSnapshot: attackerSnap,
+		BannerText:           banner,
 	})
 
 	g.bumpVersion()

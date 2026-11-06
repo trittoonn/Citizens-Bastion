@@ -22,12 +22,15 @@ export interface CardAnimEffect {
   kind:
     | 'summon'
     | 'march'
+    | 'march-up'
+    | 'march-down'
     | 'attack-up'
     | 'attack-down'
     | 'damaged'
     | 'destroyed'
     | 'buffed';
   amount?: number;
+  destroyed?: boolean;
 }
 
 interface CardViewProps {
@@ -122,6 +125,10 @@ export const CardView: React.FC<CardViewProps> = ({
       ? 'anim-card-summon ring-2 ring-[#fef08a]'
       : animEffect?.kind === 'march'
       ? 'anim-card-march ring-2 ring-[#fde68a]'
+      : animEffect?.kind === 'march-up'
+      ? 'anim-march-up ring-2 ring-[#fde68a]'
+      : animEffect?.kind === 'march-down'
+      ? 'anim-march-down ring-2 ring-[#fde68a]'
       : animEffect?.kind === 'attack-up'
       ? 'anim-attack-up ring-2 ring-[#f87171]'
       : animEffect?.kind === 'attack-down'
@@ -169,9 +176,13 @@ export const CardView: React.FC<CardViewProps> = ({
               animEffect.kind === 'attack-down') && (
               <span className="px-2 py-0.5 rounded-full bg-[#7c2d12] border border-[#fde047] font-display font-black text-[10px] text-[#fef9c3] shadow-lg">
                 ⚔️ ¡ATAQUE!
+                {animEffect.amount ? ` (${animEffect.amount}V)` : ''}
+                {animEffect.destroyed ? ' 💀' : ''}
               </span>
             )}
-            {animEffect.kind === 'march' && (
+            {(animEffect.kind === 'march' ||
+              animEffect.kind === 'march-up' ||
+              animEffect.kind === 'march-down') && (
               <span className="px-2 py-0.5 rounded-full bg-[#292118] border border-[#f3d46b] font-display font-bold text-[10px] text-[#fef08a] shadow-lg">
                 👣 MARCHA
               </span>
@@ -381,7 +392,7 @@ export const CardView: React.FC<CardViewProps> = ({
               effectiveSize === 'hand' ? 'text-[6.8px]' : 'text-[8.5px]'
             } ${isCitizen ? 'text-[#e3c158]' : 'text-[#c7d2fe]'}`}
           >
-            {isCitizen ? 'Ciudadano • Bastión' : 'Evento • Decreto'}
+            {isCitizen ? 'Ciudadano • Bastión' : 'Evento • Efecto'}
           </span>
           {card.isCustom && (
             <span className="text-[7px] font-display uppercase px-1 rounded-sm bg-[#3a2e21] text-[#f3d46b] border border-[#c59b27]/50">

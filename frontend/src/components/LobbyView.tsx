@@ -74,6 +74,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
   const [vsAi, setVsAi] = useState(false);
   const [aiDifficulty, setAiDifficulty] = useState<Exclude<AIDifficulty, ''>>('medium');
   const [vitalityMode, setVitalityMode] = useState<VitalityMode>('dynamic');
+  const [retaliationDamage, setRetaliationDamage] = useState<boolean>(false);
   const [pointsToWin, setPointsToWin] = useState(10);
   const [enforceDeckConstraints, setEnforceDeckConstraints] = useState(false);
   const [showAdvancedRules, setShowAdvancedRules] = useState(false);
@@ -120,6 +121,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
       const rules: GameRulesConfig = {
         ...DEFAULT_RULES_CONFIG,
         vitalityMode,
+        retaliationDamage,
         pointsToWin,
         deckConstraints: {
           ...localConstraints,
@@ -328,89 +330,143 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
               />
             </div>
 
-            {/* Vitality Mode Selector */}
-            <div className="space-y-2">
-              <label className="block font-display text-xs font-bold text-[#d6c7b8]">
-                Doctrina de Vitalidad (V) en Combate
-              </label>
-              <div className="grid grid-cols-1 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setVitalityMode('dynamic')}
-                  className={`text-left p-3 rounded border transition ${
-                    vitalityMode === 'dynamic'
-                      ? 'bg-[#2b2216] border-[#c59b27] text-[#f3ead8] shadow-[inset_0_0_16px_rgba(197,155,39,0.2)]'
-                      : 'bg-[#14110e] border-[#463c32] text-[#a89b8c] hover:border-[#6e5d4f]'
-                  }`}
-                >
-                  <div className="font-display text-xs font-bold text-[#e3c158]">
-                    I. Vitalidad Dinámica (Estándar)
-                  </div>
-                  <div className="font-serif text-xs text-[#d6c7b8] mt-0.5 leading-snug">
-                    La Vitalidad actual representa tanto la resistencia restante como el daño infligido al atacar.
-                  </div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setVitalityMode('base_attack')}
-                  className={`text-left p-3 rounded border transition ${
-                    vitalityMode === 'base_attack'
-                      ? 'bg-[#2b2216] border-[#c59b27] text-[#f3ead8] shadow-[inset_0_0_16px_rgba(197,155,39,0.2)]'
-                      : 'bg-[#14110e] border-[#463c32] text-[#a89b8c] hover:border-[#6e5d4f]'
-                  }`}
-                >
-                  <div className="font-display text-xs font-bold text-[#e3c158]">
-                    II. Fuerza Base Inalterable
-                  </div>
-                  <div className="font-serif text-xs text-[#d6c7b8] mt-0.5 leading-snug">
-                    El daño de ataque conserva la Vitalidad Base inicial aunque el Ciudadano sufra heridas.
-                  </div>
-                </button>
+            {/* =============================================================
+                CONFIGURACIÓN DE LA PARTIDA (Same-level Combat Rules)
+               ============================================================= */}
+            <div className="p-3.5 rounded-md bg-[#16120f] border border-[#574c3f] space-y-4">
+              <div className="flex items-center gap-2 border-b border-[#463c32] pb-2">
+                <Sliders className="w-4 h-4 text-[#c59b27]" />
+                <span className="font-display text-xs font-bold uppercase tracking-wider text-[#f3ead8]">
+                  Configuración de la Partida
+                </span>
               </div>
-            </div>
 
-            {/* Advanced Rules Toggle */}
-            <div>
-              <button
-                type="button"
-                onClick={() => setShowAdvancedRules((v) => !v)}
-                className="flex items-center gap-1.5 font-display text-[11px] text-[#c59b27] hover:text-[#e3c158] font-bold"
-              >
-                <Sliders className="w-3.5 h-3.5" />
-                {showAdvancedRules
-                  ? 'Ocultar leyes de campaña'
-                  : 'Leyes de Campaña (Puntos de Desarrollo / Límites)'}
-              </button>
+              {/* Option 1: Vitality Mode Selector */}
+              <div className="space-y-1.5">
+                <label className="block font-display text-[11px] font-bold text-[#d6c7b8]">
+                  1. Modo de Vitalidad (V)
+                </label>
+                <div className="grid grid-cols-1 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setVitalityMode('dynamic')}
+                    className={`text-left p-2.5 rounded border transition ${
+                      vitalityMode === 'dynamic'
+                        ? 'bg-[#2b2216] border-[#c59b27] text-[#f3ead8] shadow-[inset_0_0_16px_rgba(197,155,39,0.2)]'
+                        : 'bg-[#120f0d] border-[#3a322a] text-[#a89b8c] hover:border-[#6e5d4f]'
+                    }`}
+                  >
+                    <div className="font-display text-xs font-bold text-[#e3c158]">
+                      Vitalidad Dinámica (Estándar)
+                    </div>
+                    <div className="font-serif text-xs text-[#d6c7b8] mt-0.5 leading-snug">
+                      La Vitalidad actual representa tanto la resistencia restante como el daño infligido al atacar.
+                    </div>
+                  </button>
 
-              {showAdvancedRules && (
-                <div className="mt-3 p-3.5 rounded bg-[#14110e] border border-[#574c3f] space-y-3 text-xs">
-                  <div className="flex items-center justify-between">
-                    <span className="font-serif text-sm text-[#d6c7b8]">
-                      Puntos de Desarrollo para la Victoria:
-                    </span>
-                    <input
-                      type="number"
-                      min={1}
-                      max={30}
-                      value={pointsToWin}
-                      onChange={(e) => setPointsToWin(Number(e.target.value))}
-                      className="w-20 px-2.5 py-1 rounded bg-[#1f1a16] border border-[#574c3f] font-display text-[#e3c158] font-bold text-right"
-                    />
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="font-serif text-sm text-[#d6c7b8]">
-                      Exigir límites de construcción de mazo:
-                    </span>
-                    <input
-                      type="checkbox"
-                      checked={enforceDeckConstraints}
-                      onChange={(e) => setEnforceDeckConstraints(e.target.checked)}
-                      className="accent-[#c59b27] w-4 h-4"
-                    />
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setVitalityMode('base_attack')}
+                    className={`text-left p-2.5 rounded border transition ${
+                      vitalityMode === 'base_attack'
+                        ? 'bg-[#2b2216] border-[#c59b27] text-[#f3ead8] shadow-[inset_0_0_16px_rgba(197,155,39,0.2)]'
+                        : 'bg-[#120f0d] border-[#3a322a] text-[#a89b8c] hover:border-[#6e5d4f]'
+                    }`}
+                  >
+                    <div className="font-display text-xs font-bold text-[#e3c158]">
+                      Fuerza Base Inalterable
+                    </div>
+                    <div className="font-serif text-xs text-[#d6c7b8] mt-0.5 leading-snug">
+                      El daño de ataque conserva la Vitalidad Base inicial aunque el Ciudadano sufra heridas.
+                    </div>
+                  </button>
                 </div>
-              )}
+              </div>
+
+              {/* Option 2 (Same Level!): Retaliation Damage when Attacking */}
+              <div className="space-y-1.5">
+                <label className="block font-display text-[11px] font-bold text-[#d6c7b8]">
+                  2. Daño al Atacar (Contraataque del Objetivo)
+                </label>
+                <div className="grid grid-cols-1 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setRetaliationDamage(false)}
+                    className={`text-left p-2.5 rounded border transition ${
+                      !retaliationDamage
+                        ? 'bg-[#2b2216] border-[#c59b27] text-[#f3ead8] shadow-[inset_0_0_16px_rgba(197,155,39,0.2)]'
+                        : 'bg-[#120f0d] border-[#3a322a] text-[#a89b8c] hover:border-[#6e5d4f]'
+                    }`}
+                  >
+                    <div className="font-display text-xs font-bold text-[#e3c158]">
+                      Ataque Unilateral (Sin daño de retorno)
+                    </div>
+                    <div className="font-serif text-xs text-[#d6c7b8] mt-0.5 leading-snug">
+                      Cuando una carta ataca, solo el objetivo recibe daño.
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setRetaliationDamage(true)}
+                    className={`text-left p-2.5 rounded border transition ${
+                      retaliationDamage
+                        ? 'bg-[#2b2216] border-[#c59b27] text-[#f3ead8] shadow-[inset_0_0_16px_rgba(197,155,39,0.2)]'
+                        : 'bg-[#120f0d] border-[#3a322a] text-[#a89b8c] hover:border-[#6e5d4f]'
+                    }`}
+                  >
+                    <div className="font-display text-xs font-bold text-[#e3c158]">
+                      Daño de Contraataque (Choque Recíproco)
+                    </div>
+                    <div className="font-serif text-xs text-[#d6c7b8] mt-0.5 leading-snug">
+                      Cuando una carta ataca, recibe daño igual al ataque del objetivo.
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              {/* Additional Campaign Parameters Toggle */}
+              <div className="pt-1 border-t border-[#3a322a]">
+                <button
+                  type="button"
+                  onClick={() => setShowAdvancedRules((v) => !v)}
+                  className="flex items-center gap-1.5 font-display text-[11px] text-[#c59b27] hover:text-[#e3c158] font-bold"
+                >
+                  <Sliders className="w-3.5 h-3.5" />
+                  {showAdvancedRules
+                    ? 'Ocultar puntos y límites de mazo'
+                    : 'Puntos de Desarrollo y Límites de Mazo'}
+                </button>
+
+                {showAdvancedRules && (
+                  <div className="mt-2.5 p-3 rounded bg-[#120f0d] border border-[#463c32] space-y-2.5 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="font-serif text-sm text-[#d6c7b8]">
+                        Puntos de Desarrollo para la Victoria:
+                      </span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={30}
+                        value={pointsToWin}
+                        onChange={(e) => setPointsToWin(Number(e.target.value))}
+                        className="w-20 px-2.5 py-1 rounded bg-[#1f1a16] border border-[#574c3f] font-display text-[#e3c158] font-bold text-right"
+                      />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="font-serif text-sm text-[#d6c7b8]">
+                        Exigir límites de construcción de mazo:
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={enforceDeckConstraints}
+                        onChange={(e) => setEnforceDeckConstraints(e.target.checked)}
+                        className="accent-[#c59b27] w-4 h-4"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
               <button
@@ -506,11 +562,20 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                             </span>
                             <span>•</span>
                             <span>
-                              Doctrina:{' '}
+                              Vitalidad:{' '}
                               <strong className="text-[#e3c158]">
                                 {lobby.rules.vitalityMode === 'base_attack'
                                   ? 'Fuerza Base'
                                   : 'V Dinámica'}
+                              </strong>
+                            </span>
+                            <span>•</span>
+                            <span>
+                              Combate:{' '}
+                              <strong className="text-[#e3c158]">
+                                {lobby.rules.retaliationDamage
+                                  ? 'Contraataque'
+                                  : 'Unilateral'}
                               </strong>
                             </span>
                             <span>•</span>

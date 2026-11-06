@@ -228,6 +228,41 @@ func TestCombatLineOfSightAndBothVitalityModes(t *testing.T) {
 	if defBase.CurrentVitality != 4 {
 		t.Fatalf("expected defBase CurrentVitality to be 4 (10 - 6 BaseVitality), got %d", defBase.CurrentVitality)
 	}
+
+	// 3. Test RetaliationDamage (attacker takes damage equal to target's attack)
+	retRules := DefaultRulesConfig()
+	retRules.RetaliationDamage = true
+	gsRet := NewGameState("g4_ret", "Retaliation Combat", retRules)
+	_ = gsRet.AddPlayer("p1", "Alice", makeUniformDeck(cab, 15))
+	_ = gsRet.AddPlayer("p2", "Bob", makeUniformDeck(cab, 15))
+	_ = gsRet.ApplyMulligan("p1", nil)
+	_ = gsRet.ApplyMulligan("p2", nil)
+
+	attRet1 := &CardInstance{InstanceID: "att_ret_1", OwnerID: "p1", Definition: cab, BaseVitality: 10, CurrentVitality: 10, Zone: ZoneCombat}
+	attRet2 := &CardInstance{InstanceID: "att_ret_2", OwnerID: "p1", Definition: reclutador, BaseVitality: 6, CurrentVitality: 4, Zone: ZoneCombat}
+	defRet := &CardInstance{InstanceID: "def_ret", OwnerID: "p2", Definition: cab, BaseVitality: 10, CurrentVitality: 14, Zone: ZoneCombat}
+	gsRet.Players[0].Board[ZoneCombat] = []*CardInstance{attRet1, attRet2}
+	gsRet.Players[1].Board[ZoneCombat] = []*CardInstance{defRet}
+
+	// First attack: attRet1 (10V) attacks defRet (14V).
+	// defRet takes 10 dmg -> 4V left; attRet1 takes 14 dmg -> destroyed!
+	if err := gsRet.AttackCitizen("p1", "att_ret_1", "def_ret"); err != nil {
+		t.Fatalf("Retaliation attack 1 failed: %v", err)
+	}
+	if defRet.CurrentVitality != 4 {
+		t.Fatalf("expected defRet CurrentVitality to be 4, got %d", defRet.CurrentVitality)
+	}
+	if len(gsRet.Players[0].Board[ZoneCombat]) != 1 {
+		t.Fatalf("expected attRet1 to be destroyed by 14V retaliation damage, remaining attackers=%d", len(gsRet.Players[0].Board[ZoneCombat]))
+	}
+
+	// Second attack: attRet2 (4V) attacks defRet (now 4V). Both deal 4 dmg and both are destroyed!
+	if err := gsRet.AttackCitizen("p1", "att_ret_2", "def_ret"); err != nil {
+		t.Fatalf("Retaliation attack 2 failed: %v", err)
+	}
+	if len(gsRet.Players[0].Board[ZoneCombat]) != 0 || len(gsRet.Players[1].Board[ZoneCombat]) != 0 {
+		t.Fatalf("expected both attRet2 and defRet to be destroyed in mutual 4V clash")
+	}
 }
 
 func TestAllTenBaseCardsAndTriggerOrdering(t *testing.T) {

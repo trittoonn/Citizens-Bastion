@@ -111,21 +111,24 @@ const (
 
 // ActionAnimationEvent carries metadata about a discrete game action or effect.
 type ActionAnimationEvent struct {
-	Seq                int64               `json:"seq"`
-	Type               ActionAnimationType `json:"type"`
-	ActorID            string              `json:"actorId"`
-	ActorName          string              `json:"actorName"`
-	CardInstanceID     string              `json:"cardInstanceId,omitempty"`
-	CardName           string              `json:"cardName,omitempty"`
-	CardDefinition     *CardDefinition     `json:"cardDefinition,omitempty"`
-	FromZone           ZoneID              `json:"fromZone,omitempty"`
-	ToZone             ZoneID              `json:"toZone,omitempty"`
-	TargetCardID       string              `json:"targetCardId,omitempty"`
-	TargetCardName     string              `json:"targetCardName,omitempty"`
-	TargetCardSnapshot *CardInstance       `json:"targetCardSnapshot,omitempty"`
-	Amount             int                 `json:"amount,omitempty"`
-	Destroyed          bool                `json:"destroyed,omitempty"`
-	BannerText         string              `json:"bannerText"`
+	Seq                  int64               `json:"seq"`
+	Type                 ActionAnimationType `json:"type"`
+	ActorID              string              `json:"actorId"`
+	ActorName            string              `json:"actorName"`
+	CardInstanceID       string              `json:"cardInstanceId,omitempty"`
+	CardName             string              `json:"cardName,omitempty"`
+	CardDefinition       *CardDefinition     `json:"cardDefinition,omitempty"`
+	FromZone             ZoneID              `json:"fromZone,omitempty"`
+	ToZone               ZoneID              `json:"toZone,omitempty"`
+	TargetCardID         string              `json:"targetCardId,omitempty"`
+	TargetCardName       string              `json:"targetCardName,omitempty"`
+	TargetCardSnapshot   *CardInstance       `json:"targetCardSnapshot,omitempty"`
+	Amount               int                 `json:"amount,omitempty"`
+	Destroyed            bool                `json:"destroyed,omitempty"`
+	AttackerDamage       int                 `json:"attackerDamage,omitempty"`
+	AttackerDestroyed    bool                `json:"attackerDestroyed,omitempty"`
+	AttackerCardSnapshot *CardInstance       `json:"attackerCardSnapshot,omitempty"`
+	BannerText           string              `json:"bannerText"`
 }
 
 type rawStepRecord struct {

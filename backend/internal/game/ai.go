@@ -216,35 +216,53 @@ func (g *GameState) tryAIAttack(ai, human *PlayerState, diff AIDifficulty) bool 
 		return g.AttackCitizen(ai.ID, attacker.InstanceID, targetID) == nil
 	}
 
-	// Medium & Hard AI: Prioritize a target that can be destroyed by this attack (lethal blow),
-	// especially highest Vitality target that dies to atkPower; otherwise hit highest threat.
-	var bestKill *CardInstance
-	var highestThreat *CardInstance
+	// Medium & Hard AI: Score each target, taking RetaliationDamage into account if enabled.
+	var bestTarget *CardInstance
+	bestScore := -9999
 
 	for _, tid := range validTargetIDs {
 		def, _, _ := g.findBoardCard(human, tid)
 		if def == nil {
 			continue
 		}
-		if def.CurrentVitality <= atkPower {
-			if bestKill == nil || def.CurrentVitality > bestKill.CurrentVitality {
-				bestKill = def
+		score := def.CurrentVitality * 10
+		killsDefender := def.CurrentVitality <= atkPower
+		if killsDefender {
+			score += 100
+		}
+
+		if g.Rules.RetaliationDamage {
+			defCounter := def.AttackPower(g.Rules.VitalityMode)
+			attackerDies := attacker.CurrentVitality <= defCounter
+			if attackerDies {
+				if killsDefender && def.CurrentVitality >= attacker.CurrentVitality {
+					// Favorable or even 1-for-1 trade
+					score += 20
+				} else {
+					// Attacker dies without killing a higher/equal value unit
+					score -= 80
+				}
+			} else {
+				// Attacker survives the counter-attack!
+				score += 45
 			}
 		}
-		if highestThreat == nil || def.CurrentVitality > highestThreat.CurrentVitality {
-			highestThreat = def
+
+		if score > bestScore {
+			bestScore = score
+			bestTarget = def
 		}
 	}
 
-	chosen := highestThreat
-	if bestKill != nil {
-		chosen = bestKill
+	if bestTarget == nil {
+		return false
 	}
-	if chosen == nil {
+	// On Hard difficulty with RetaliationDamage, avoid pointless suicide attacks (score < 0) unless we have multiple attackers
+	if diff == AIDifficultyHard && g.Rules.RetaliationDamage && bestScore < 0 && len(readyAttackers) == 1 {
 		return false
 	}
 
-	return g.AttackCitizen(ai.ID, attacker.InstanceID, chosen.InstanceID) == nil
+	return g.AttackCitizen(ai.ID, attacker.InstanceID, bestTarget.InstanceID) == nil
 }
 
 func (g *GameState) tryAIPlayCard(ai, human *PlayerState, diff AIDifficulty) bool {

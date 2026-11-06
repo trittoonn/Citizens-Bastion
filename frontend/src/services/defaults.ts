@@ -311,6 +311,7 @@ export const DEFAULT_DECKS: DeckPreset[] = [
 
 export const DEFAULT_RULES_CONFIG: GameRulesConfig = {
   vitalityMode: 'dynamic',
+  retaliationDamage: false,
   pointsToWin: 10,
   initialHandSize: 4,
   drawPerTurn: 2,

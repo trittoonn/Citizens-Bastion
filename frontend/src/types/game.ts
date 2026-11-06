@@ -96,6 +96,7 @@ export interface DeckConstraints {
 
 export interface GameRulesConfig {
   vitalityMode: VitalityMode;
+  retaliationDamage: boolean;
   pointsToWin: number;
   initialHandSize: number;
   drawPerTurn: number;
@@ -167,6 +168,9 @@ export interface ActionAnimationEvent {
   targetCardSnapshot?: CardInstance;
   amount?: number;
   destroyed?: boolean;
+  attackerDamage?: number;
+  attackerDestroyed?: boolean;
+  attackerCardSnapshot?: CardInstance;
   bannerText: string;
 }
 

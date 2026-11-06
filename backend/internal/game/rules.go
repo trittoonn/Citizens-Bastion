@@ -26,21 +26,23 @@ type DeckConstraints struct {
 
 // GameRulesConfig holds configurable match parameters.
 type GameRulesConfig struct {
-	VitalityMode       VitalityMode    `json:"vitalityMode"`
-	PointsToWin        int             `json:"pointsToWin"`
-	InitialHandSize    int             `json:"initialHandSize"`
-	DrawPerTurn        int             `json:"drawPerTurn"`
-	FirstTurnDraw      int             `json:"firstTurnDraw"`
-	MaxPlaysPerTurn    int             `json:"maxPlaysPerTurn"`
-	FirstTurnMaxPlays  int             `json:"firstTurnMaxPlays"`
-	MaxMovesPerTurn    int             `json:"maxMovesPerTurn"`
-	DeckConstraints    DeckConstraints `json:"deckConstraints"`
+	VitalityMode      VitalityMode    `json:"vitalityMode"`
+	RetaliationDamage bool            `json:"retaliationDamage"`
+	PointsToWin       int             `json:"pointsToWin"`
+	InitialHandSize   int             `json:"initialHandSize"`
+	DrawPerTurn       int             `json:"drawPerTurn"`
+	FirstTurnDraw     int             `json:"firstTurnDraw"`
+	MaxPlaysPerTurn   int             `json:"maxPlaysPerTurn"`
+	FirstTurnMaxPlays int             `json:"firstTurnMaxPlays"`
+	MaxMovesPerTurn   int             `json:"maxMovesPerTurn"`
+	DeckConstraints   DeckConstraints `json:"deckConstraints"`
 }
 
 // DefaultRulesConfig returns the standard rules from Reglas 2026 v1.md.
 func DefaultRulesConfig() GameRulesConfig {
 	return GameRulesConfig{
 		VitalityMode:      VitalityModeDynamic,
+		RetaliationDamage: false,
 		PointsToWin:       10,
 		InitialHandSize:   4,
 		DrawPerTurn:       2,

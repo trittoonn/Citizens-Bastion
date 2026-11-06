@@ -202,7 +202,7 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
     }
   }, []);
 
-  // Step-by-step playback effect
+  // 1) Dequeue the next animation step automatically whenever no step is active
   useEffect(() => {
     if (activeStep !== null) {
       return;
@@ -217,25 +217,32 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
     setAnimQueue(rest);
     setActiveStep(nextStep);
     setSeqCurrentIdx((c) => c + 1);
+  }, [activeStep, animQueue]);
 
-    // Determine duration: AI/Opponent steps play slightly longer (~1050ms) so the user can watch each move clearly;
-    // Player's own single actions play snappily (~680ms), or ~850ms if followed by AI responses.
-    const isMyAction = nextStep.event.actorId === playerId;
-    const isTurnBanner = nextStep.event.type === 'TURN_START';
+  // 2) Automatically advance activeStep after a brisk, readable duration
+  // (Kept in a separate effect from animQueue so dequeueing never cancels the timer!)
+  useEffect(() => {
+    if (!activeStep) {
+      return;
+    }
+
+    const isMyAction = activeStep.event.actorId === playerId;
+    const isTurnBanner = activeStep.event.type === 'TURN_START';
+    const isEventShowcase = activeStep.event.type === 'PLAY_EVENT';
     const durationMs = isTurnBanner
-      ? 680
+      ? 380
+      : isEventShowcase
+      ? 620
       : isMyAction
-      ? rest.length > 0
-        ? 820
-        : 650
-      : 1050;
+      ? 450
+      : 560;
 
     const timer = setTimeout(() => {
       setActiveStep(null);
     }, durationMs);
 
     return () => clearTimeout(timer);
-  }, [activeStep, animQueue, playerId]);
+  }, [activeStep, playerId]);
 
   const skipAnimations = () => {
     setAnimQueue([]);
@@ -312,12 +319,22 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
         return { kind: 'summon' };
       }
       if (ev.type === 'MOVE_CITIZEN' && ev.cardInstanceId === inst.instanceId) {
-        return { kind: 'march' };
+        const rank: Record<string, number> = { city: 0, road: 1, combat: 2 };
+        const fromR = ev.fromZone ? rank[ev.fromZone] ?? 0 : 0;
+        const toR = ev.toZone ? rank[ev.toZone] ?? 1 : 1;
+        const movingTowardFront = toR >= fromR;
+        const isMe = ev.actorId === playerId;
+        // On screen: player's rows go City (bottom) -> Road -> Combat (top), so toward front is UP.
+        // Opponent's rows go City (top) -> Road -> Combat (bottom), so toward front is DOWN.
+        const visualUp = isMe ? movingTowardFront : !movingTowardFront;
+        return { kind: visualUp ? 'march-up' : 'march-down' };
       }
       if (ev.type === 'ATTACK') {
         if (ev.cardInstanceId === inst.instanceId) {
           return {
             kind: ev.actorId === playerId ? 'attack-up' : 'attack-down',
+            amount: ev.attackerDamage,
+            destroyed: ev.attackerDestroyed,
           };
         }
         if (ev.targetCardId === inst.instanceId) {
@@ -348,24 +365,37 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
     [activeStep, playerId]
   );
 
-  // Helper to include a just-destroyed card in its row during the hit/destroy animation step
+  // Helper to include a just-destroyed card (defender or counter-killed attacker) in its row during the hit/destroy animation step
   const getRowCardsWithDyingSnapshot = useCallback(
     (baseCards: CardInstance[], ownerId: string | undefined, zoneId: ZoneID) => {
-      if (
-        !activeStep ||
-        !activeStep.event.destroyed ||
-        !activeStep.event.targetCardSnapshot ||
-        !ownerId
-      ) {
+      if (!activeStep || !ownerId) {
         return baseCards;
       }
-      const snap = activeStep.event.targetCardSnapshot;
-      if (snap.ownerId === ownerId && snap.zone === zoneId) {
-        if (!baseCards.some((c) => c.instanceId === snap.instanceId)) {
-          return [...baseCards, snap];
+      let out = baseCards;
+      if (activeStep.event.destroyed && activeStep.event.targetCardSnapshot) {
+        const snap = activeStep.event.targetCardSnapshot;
+        if (
+          snap.ownerId === ownerId &&
+          snap.zone === zoneId &&
+          !out.some((c) => c.instanceId === snap.instanceId)
+        ) {
+          out = [...out, snap];
         }
       }
-      return baseCards;
+      if (
+        activeStep.event.attackerDestroyed &&
+        activeStep.event.attackerCardSnapshot
+      ) {
+        const atkSnap = activeStep.event.attackerCardSnapshot;
+        if (
+          atkSnap.ownerId === ownerId &&
+          atkSnap.zone === zoneId &&
+          !out.some((c) => c.instanceId === atkSnap.instanceId)
+        ) {
+          out = [...out, atkSnap];
+        }
+      }
+      return out;
     },
     [activeStep]
   );
@@ -576,10 +606,20 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
           </div>
         </div>
 
-        {/* Right: Vitality Mode Badge & Opponent Reserves */}
-        <div className="flex items-center gap-2 text-[11px]">
+        {/* Right: Vitality & Combat Mode Badges & Opponent Reserves */}
+        <div className="flex items-center gap-1.5 text-[11px]">
           <span className="hidden md:inline-block px-2 py-0.5 rounded-sm bg-[#1a1613] border border-[#574c3f] text-[#d6c7b8] font-display text-[10px]">
             {view.rules.vitalityMode === 'base_attack' ? 'Fuerza Base' : 'V Dinámica'}
+          </span>
+          <span
+            title={
+              view.rules.retaliationDamage
+                ? 'Cuando una carta ataca, recibe daño igual al ataque del objetivo'
+                : 'Cuando una carta ataca, solo el objetivo recibe daño'
+            }
+            className="hidden lg:inline-block px-2 py-0.5 rounded-sm bg-[#1a1613] border border-[#574c3f] text-[#e3c158] font-display text-[10px]"
+          >
+            {view.rules.retaliationDamage ? '⚔️ Contraataque' : '⚔️ Unilateral'}
           </span>
           {view.opponent && (
             <span className="px-2.5 py-0.5 rounded-sm bg-[#241b17] border border-[#6b5a48] text-[#f3ead8] font-display text-[10px]">
@@ -676,7 +716,7 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
                   <div className="anim-card-summon flex flex-col items-center gap-2 p-4 rounded-xl bg-gradient-to-b from-[#2b2118]/95 to-[#14100c]/95 border-2 border-[#f3d46b] shadow-[0_20px_50px_rgba(0,0,0,0.95)]">
                     <div className="font-display text-xs font-bold uppercase tracking-widest text-[#f3d46b] flex items-center gap-1.5">
                       <Flame className="w-4 h-4 text-[#f87171]" />
-                      Decreto Ejecutado por {activeStep.event.actorName}
+                      Efecto Activado por {activeStep.event.actorName}
                     </div>
                     <CardView
                       card={activeStep.event.cardDefinition}
@@ -1132,7 +1172,7 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
                     className="btn-war-gold w-full px-3 py-2 rounded text-[11px] flex items-center justify-center gap-1.5 shadow-[0_0_20px_rgba(243,212,107,0.75)]"
                   >
                     <Flame className="w-4 h-4 shrink-0" />
-                    <span className="truncate">Ejecutar Decreto</span>
+                    <span className="truncate">Activar efecto</span>
                   </button>
                   <button
                     type="button"
@@ -1426,7 +1466,7 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
           <div className="bastion-panel rounded-lg max-w-4xl w-full p-6 space-y-4 border-2 border-[#f3d46b]">
             <div className="border-b border-[#6b5a48] pb-3">
               <span className="font-display text-xs font-bold uppercase text-[#f3d46b]">
-                Decreto en Curso ({view.pendingPrompt.sourceCardName})
+                Efecto en Curso ({view.pendingPrompt.sourceCardName})
               </span>
               <h3 className="font-display text-lg font-bold text-[#f3ead8]">
                 {view.pendingPrompt.promptText}
