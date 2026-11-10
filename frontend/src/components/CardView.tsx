@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { CardDefinition, CardInstance, VitalityMode } from '../types/game';
 import { CardArt } from './CardArt';
+import { renderTextWithKeywords } from '../utils/keywords';
 
 export type CardSize = 'board' | 'hand' | 'md' | 'lg';
 
@@ -577,7 +578,7 @@ export const CardView: React.FC<CardViewProps> = ({
                 : 'text-[11px] line-clamp-4'
             }`}
           >
-            {card.description || 'Sin habilidades especiales.'}
+            {renderTextWithKeywords(card.description)}
           </p>
 
           {footerAction && (

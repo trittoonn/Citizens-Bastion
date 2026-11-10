@@ -3,8 +3,12 @@ import {
   Award,
   BarChart3,
   Bot,
+  ChevronDown,
+  ChevronUp,
   Clock,
   Flame,
+  HelpCircle,
+  Info,
   Layers,
   Play,
   Trophy,
@@ -58,6 +62,25 @@ export const AiVsAiSimulatorModal: React.FC<AiVsAiSimulatorModalProps> = ({
   const [report, setReport] = useState<SimulationReport | null>(null);
   const [sortField, setSortField] = useState<CardSortField>('timesPlayed');
   const [sortAsc, setSortAsc] = useState<boolean>(false);
+
+  // Slide-down explanations state (individual keys or "all")
+  const [openHelpKeys, setOpenHelpKeys] = useState<Record<string, boolean>>({});
+  const [showAllHelp, setShowAllHelp] = useState<boolean>(false);
+
+  const toggleHelpKey = (key: string) => {
+    setOpenHelpKeys((prev) => ({
+      ...prev,
+      [key]: !(prev[key] ?? showAllHelp),
+    }));
+  };
+
+  const isHelpOpen = (key: string) => Boolean(openHelpKeys[key] ?? showAllHelp);
+
+  const handleToggleAllHelp = () => {
+    const next = !showAllHelp;
+    setShowAllHelp(next);
+    setOpenHelpKeys({});
+  };
 
   const selectedDeckA = useMemo(
     () => decks.find((d) => d.id === deckAId) || decks[0],
@@ -142,10 +165,10 @@ export const AiVsAiSimulatorModal: React.FC<AiVsAiSimulatorModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#090807]/90 backdrop-blur-md p-4 overflow-y-auto">
-      <div className="bastion-panel border-2 border-[#c59b27] rounded-lg max-w-6xl w-full max-h-[92vh] flex flex-col overflow-hidden shadow-[0_24px_64px_rgba(0,0,0,0.95)]">
+    <div className="bastion-panel border-2 border-[#c59b27] rounded-lg w-full flex flex-col overflow-hidden shadow-[0_18px_48px_rgba(0,0,0,0.9)]">
+      <div>
         {/* Header */}
-        <div className="bastion-panel-header px-6 py-4 flex items-center justify-between shrink-0">
+        <div className="bastion-panel-header px-6 py-4 flex items-center justify-between shrink-0 gap-3 flex-wrap">
           <div className="flex items-center gap-3">
             <div className="p-2 rounded bg-gradient-to-b from-[#f3d46b] to-[#966e15] text-[#14100c] border border-[#fef08a]">
               <Bot className="w-5 h-5" />
@@ -155,21 +178,33 @@ export const AiVsAiSimulatorModal: React.FC<AiVsAiSimulatorModalProps> = ({
                 Laboratorio Táctico IA vs IA — Simulación en Paralelo
               </h2>
               <p className="font-serif text-xs text-[#d6c7b8]">
-                Enfrentá dos mazos en múltiples partidas simultáneas para analizar balance, ventaja de salida, daño y uso de cada carta.
+                Enfrentá dos mazos en múltiples partidas simultáneas para analizar balance, impacto de ir primero, daño y uso de cada carta.
               </p>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="btn-war-iron px-3 py-1.5 rounded text-xs flex items-center gap-1"
-          >
-            <X className="w-4 h-4" /> Cerrar
-          </button>
+          <div className="flex items-center gap-2">
+            {report && (
+              <button
+                type="button"
+                onClick={handleToggleAllHelp}
+                className="btn-war-iron px-3 py-1.5 rounded text-xs flex items-center gap-1.5 border-[#c59b27]/70 text-[#fef08a]"
+              >
+                <HelpCircle className="w-3.5 h-3.5 text-[#f3d46b]" />
+                {showAllHelp ? 'Ocultar explicaciones' : '¿Qué significa cada métrica?'}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              className="btn-war-iron px-3.5 py-1.5 rounded text-xs flex items-center gap-1.5"
+            >
+              <X className="w-4 h-4 text-[#f3d46b]" /> ← Volver a Salas de Guerra
+            </button>
+          </div>
         </div>
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        <div className="p-6 space-y-6">
           {/* Simulation Configuration Form */}
           <form
             onSubmit={handleRunSimulation}
@@ -233,7 +268,7 @@ export const AiVsAiSimulatorModal: React.FC<AiVsAiSimulatorModalProps> = ({
               {/* Starting Player Mode */}
               <div>
                 <label className="block font-display text-xs font-bold text-[#e3c158] mb-1">
-                  Orden de Salida (Turno 1)
+                  ¿Quién empieza en el Turno 1?
                 </label>
                 <select
                   value={startingMode}
@@ -242,7 +277,7 @@ export const AiVsAiSimulatorModal: React.FC<AiVsAiSimulatorModalProps> = ({
                   }
                   className="w-full px-3 py-2 rounded bg-[#0e0c0a] border border-[#6b5a48] font-display text-xs font-bold text-[#f3ead8] focus:border-[#c59b27] focus:outline-none"
                 >
-                  <option value="alternate">Alternado 50/50 (Justo)</option>
+                  <option value="alternate">Alternado 50/50 (Mitad empieza A, mitad B)</option>
                   <option value="random">Aleatorio en cada partida</option>
                   <option value="deckA">Siempre empieza Mazo A</option>
                   <option value="deckB">Siempre empieza Mazo B</option>
@@ -338,12 +373,35 @@ export const AiVsAiSimulatorModal: React.FC<AiVsAiSimulatorModalProps> = ({
             <div className="space-y-6">
               {/* 1. Headline Summary Cards */}
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                {/* Winner Banner */}
-                <div className="p-4 rounded-lg bg-gradient-to-b from-[#231d16] to-[#14110e] border-2 border-[#c59b27] flex flex-col justify-between">
-                  <div className="flex items-center justify-between text-xs font-display text-[#f3d46b] uppercase">
-                    <span>Mazo Dominante</span>
-                    <Trophy className="w-4 h-4 text-[#f3d46b]" />
+                {/* Card 1: Winner Banner */}
+                <div
+                  title="Muestra cuál de los dos mazos ganó más partidas en total durante la simulación."
+                  className="p-4 rounded-lg bg-gradient-to-b from-[#231d16] to-[#14110e] border-2 border-[#c59b27] flex flex-col justify-between"
+                >
+                  <div>
+                    <div className="flex items-center justify-between text-xs font-display text-[#f3d46b] uppercase">
+                      <span>Mazo Ganador</span>
+                      <button
+                        type="button"
+                        onClick={() => toggleHelpKey('winner')}
+                        className="flex items-center gap-0.5 text-[#f3d46b] hover:text-white"
+                        title="Ver explicación"
+                      >
+                        <Info className="w-3.5 h-3.5" />
+                        {isHelpOpen('winner') ? (
+                          <ChevronUp className="w-3 h-3" />
+                        ) : (
+                          <ChevronDown className="w-3 h-3" />
+                        )}
+                      </button>
+                    </div>
+                    {isHelpOpen('winner') && (
+                      <p className="mt-1.5 p-2 rounded bg-black/40 border border-[#c59b27]/40 font-serif text-[11px] text-[#e7dfd3] leading-snug">
+                        Indica qué mazo acumuló más victorias en las {report.totalGames} partidas simuladas y la proporción de victorias de Mazo A (azul) vs Mazo B (rojo).
+                      </p>
+                    )}
                   </div>
+
                   <div className="my-2">
                     <div className="font-display text-base font-black text-[#fef08a] truncate">
                       {report.deckA.wins > report.deckB.wins
@@ -372,19 +430,42 @@ export const AiVsAiSimulatorModal: React.FC<AiVsAiSimulatorModalProps> = ({
                   </div>
                 </div>
 
-                {/* First Player Advantage */}
-                <div className="p-4 rounded-lg bg-[#16120f] border border-[#574c3f] flex flex-col justify-between">
-                  <div className="flex items-center justify-between text-xs font-display text-[#e3c158] uppercase">
-                    <span>Ventaja de Salida (1º vs 2º)</span>
-                    <Award className="w-4 h-4 text-[#e3c158]" />
+                {/* Card 2: Wins by Starting Turn Order (Who went 1st vs 2nd) */}
+                <div
+                  title="Compara cuántas partidas fueron ganadas por el jugador al que le tocó empezar en el Turno 1 frente al jugador que empezó segundo, sin importar qué mazo usaba."
+                  className="p-4 rounded-lg bg-[#16120f] border border-[#574c3f] flex flex-col justify-between"
+                >
+                  <div>
+                    <div className="flex items-center justify-between text-xs font-display text-[#e3c158] uppercase">
+                      <span>¿Ganó el que empezó 1º?</span>
+                      <button
+                        type="button"
+                        onClick={() => toggleHelpKey('turnOrder')}
+                        className="flex items-center gap-0.5 text-[#e3c158] hover:text-white"
+                        title="Ver explicación"
+                      >
+                        <Info className="w-3.5 h-3.5" />
+                        {isHelpOpen('turnOrder') ? (
+                          <ChevronUp className="w-3 h-3" />
+                        ) : (
+                          <ChevronDown className="w-3 h-3" />
+                        )}
+                      </button>
+                    </div>
+                    {isHelpOpen('turnOrder') && (
+                      <p className="mt-1.5 p-2 rounded bg-black/40 border border-[#6b5a48] font-serif text-[11px] text-[#e7dfd3] leading-snug">
+                        Mide cuántas veces ganó el jugador que tuvo el <strong>primer turno de la partida (Salir 1º)</strong> frente al que empezó segundo (Salir 2º), sin importar qué mazo usaba. Sirve para saber si empezar primero da ventaja.
+                      </p>
+                    )}
                   </div>
+
                   <div className="my-2">
                     <div className="font-display text-sm font-black text-[#f3ead8]">
-                      1º Jugador: {report.firstPlayerWins} victorias (
+                      Salió 1º: ganó {report.firstPlayerWins} veces (
                       {report.firstPlayerWinRate.toFixed(1)}%)
                     </div>
                     <div className="font-serif text-xs text-[#a89b8c]">
-                      2º Jugador: {report.secondPlayerWins} victorias (
+                      Salió 2º: ganó {report.secondPlayerWins} veces (
                       {report.secondPlayerWinRate.toFixed(1)}%)
                     </div>
                   </div>
@@ -400,12 +481,35 @@ export const AiVsAiSimulatorModal: React.FC<AiVsAiSimulatorModalProps> = ({
                   </div>
                 </div>
 
-                {/* Most & Least Used Cards */}
-                <div className="p-4 rounded-lg bg-[#16120f] border border-[#574c3f] flex flex-col justify-between">
-                  <div className="flex items-center justify-between text-xs font-display text-[#86efac] uppercase">
-                    <span>Uso de Cartas</span>
-                    <Layers className="w-4 h-4 text-[#86efac]" />
+                {/* Card 3: Most & Least Used Cards */}
+                <div
+                  title="Muestra la carta que más veces se jugó desde la mano o descarte y la carta que menos veces se llegó a jugar."
+                  className="p-4 rounded-lg bg-[#16120f] border border-[#574c3f] flex flex-col justify-between"
+                >
+                  <div>
+                    <div className="flex items-center justify-between text-xs font-display text-[#86efac] uppercase">
+                      <span>Uso de Cartas</span>
+                      <button
+                        type="button"
+                        onClick={() => toggleHelpKey('cardUsage')}
+                        className="flex items-center gap-0.5 text-[#86efac] hover:text-white"
+                        title="Ver explicación"
+                      >
+                        <Info className="w-3.5 h-3.5" />
+                        {isHelpOpen('cardUsage') ? (
+                          <ChevronUp className="w-3 h-3" />
+                        ) : (
+                          <ChevronDown className="w-3 h-3" />
+                        )}
+                      </button>
+                    </div>
+                    {isHelpOpen('cardUsage') && (
+                      <p className="mt-1.5 p-2 rounded bg-black/40 border border-[#6b5a48] font-serif text-[11px] text-[#e7dfd3] leading-snug">
+                        Destaca qué carta fue desplegada o activada más veces sumando todas las partidas, y cuál fue la menos utilizada.
+                      </p>
+                    )}
                   </div>
+
                   <div className="space-y-1.5 my-1 text-xs">
                     {report.mostUsedCard && (
                       <div>
@@ -438,12 +542,35 @@ export const AiVsAiSimulatorModal: React.FC<AiVsAiSimulatorModalProps> = ({
                   </div>
                 </div>
 
-                {/* Top Damage Card & Simulation Pace */}
-                <div className="p-4 rounded-lg bg-[#16120f] border border-[#574c3f] flex flex-col justify-between">
-                  <div className="flex items-center justify-between text-xs font-display text-[#fca5a5] uppercase">
-                    <span>Mayor Daño y Ritmo</span>
-                    <Flame className="w-4 h-4 text-[#f87171]" />
+                {/* Card 4: Top Damage Card & Simulation Pace */}
+                <div
+                  title="Muestra la carta que más daño total infligió a unidades enemigas (por ataques y efectos) y la duración promedio en turnos."
+                  className="p-4 rounded-lg bg-[#16120f] border border-[#574c3f] flex flex-col justify-between"
+                >
+                  <div>
+                    <div className="flex items-center justify-between text-xs font-display text-[#fca5a5] uppercase">
+                      <span>Mayor Daño y Duración</span>
+                      <button
+                        type="button"
+                        onClick={() => toggleHelpKey('topDamage')}
+                        className="flex items-center gap-0.5 text-[#fca5a5] hover:text-white"
+                        title="Ver explicación"
+                      >
+                        <Info className="w-3.5 h-3.5" />
+                        {isHelpOpen('topDamage') ? (
+                          <ChevronUp className="w-3 h-3" />
+                        ) : (
+                          <ChevronDown className="w-3 h-3" />
+                        )}
+                      </button>
+                    </div>
+                    {isHelpOpen('topDamage') && (
+                      <p className="mt-1.5 p-2 rounded bg-black/40 border border-[#6b5a48] font-serif text-[11px] text-[#e7dfd3] leading-snug">
+                        Indica la carta que causó más daño total (sumando combates y habilidades) y cuántos turnos duraron en promedio las partidas.
+                      </p>
+                    )}
                   </div>
+
                   <div className="space-y-1.5 my-1 text-xs">
                     {report.topDamageCard && (
                       <div>
@@ -483,23 +610,40 @@ export const AiVsAiSimulatorModal: React.FC<AiVsAiSimulatorModalProps> = ({
                     badgeColor: 'border-[#3b82f6] bg-[#172536]/40',
                     titleColor: 'text-[#93c5fd]',
                     label: 'Mazo A',
+                    helpKey: 'deckAStats',
                   },
                   {
                     summary: report.deckB,
                     badgeColor: 'border-[#ef4444] bg-[#361515]/40',
                     titleColor: 'text-[#fca5a5]',
                     label: 'Mazo B',
+                    helpKey: 'deckBStats',
                   },
-                ].map(({ summary, badgeColor, titleColor, label }) => (
+                ].map(({ summary, badgeColor, titleColor, label, helpKey }) => (
                   <div
                     key={label}
                     className={`p-4 rounded-lg border ${badgeColor} space-y-3`}
                   >
                     <div className="flex items-center justify-between border-b border-[#463c32] pb-2">
                       <div>
-                        <span className="font-display text-[10px] uppercase tracking-wider text-[#a89b8c]">
-                          {label}
-                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-display text-[10px] uppercase tracking-wider text-[#a89b8c]">
+                            {label}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => toggleHelpKey(helpKey)}
+                            className="text-[#f3d46b] hover:text-white flex items-center gap-0.5 text-[10px] font-display"
+                            title="Ver explicación de las métricas del mazo"
+                          >
+                            <Info className="w-3.5 h-3.5" />
+                            {isHelpOpen(helpKey) ? (
+                              <ChevronUp className="w-3 h-3" />
+                            ) : (
+                              <ChevronDown className="w-3 h-3" />
+                            )}
+                          </button>
+                        </div>
                         <h3 className={`font-display text-base font-bold ${titleColor}`}>
                           {summary.deckName}
                         </h3>
@@ -508,15 +652,38 @@ export const AiVsAiSimulatorModal: React.FC<AiVsAiSimulatorModalProps> = ({
                         <div className="font-display text-lg font-black text-[#fef08a]">
                           {summary.wins} Victorias ({summary.winRate.toFixed(1)}%)
                         </div>
-                        <div className="font-serif text-[11px] text-[#d6c7b8]">
-                          Ganó yendo 1º: {summary.winsGoingFirst} • Ganó yendo 2º:{' '}
+                        <div
+                          title="Cuántas victorias consiguió este mazo cuando le tocó empezar en el Turno 1 vs cuando empezó segundo."
+                          className="font-serif text-[11px] text-[#d6c7b8]"
+                        >
+                          Ganó saliendo 1º: {summary.winsGoingFirst} • Saliendo 2º:{' '}
                           {summary.winsGoingSecond}
                         </div>
                       </div>
                     </div>
 
+                    {isHelpOpen(helpKey) && (
+                      <div className="p-2.5 rounded bg-black/40 border border-[#574c3f] font-serif text-[11px] text-[#e7dfd3] space-y-1 leading-snug">
+                        <div>
+                          • <strong>Daño por Partida:</strong> Promedio, mínimo y máximo de daño total que este mazo le hizo a las cartas rivales por partida.
+                        </div>
+                        <div>
+                          • <strong>Cartas Jugadas:</strong> Cuántas cartas bajó o activó este mazo por partida (Prom / Mín / Máx).
+                        </div>
+                        <div>
+                          • <strong>Cartas en Mano (Fin):</strong> Con cuántas cartas en la mano terminó la partida este mazo (mide si se queda sin recursos o acumula cartas).
+                        </div>
+                        <div>
+                          • <strong>Puntos Desarrollo:</strong> Con cuántos Puntos de Desarrollo terminó en promedio cada partida.
+                        </div>
+                      </div>
+                    )}
+
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-                      <div className="p-2.5 rounded bg-[#120f0d] border border-[#3a322a]">
+                      <div
+                        title="Daño total infligido por este mazo en cada partida (Promedio, Mínimo en una partida y Máximo en una partida)."
+                        className="p-2.5 rounded bg-[#120f0d] border border-[#3a322a]"
+                      >
                         <span className="block font-display text-[10px] text-[#fca5a5] uppercase">
                           Daño por Partida
                         </span>
@@ -528,7 +695,10 @@ export const AiVsAiSimulatorModal: React.FC<AiVsAiSimulatorModalProps> = ({
                         </span>
                       </div>
 
-                      <div className="p-2.5 rounded bg-[#120f0d] border border-[#3a322a]">
+                      <div
+                        title="Cantidad de cartas jugadas por este mazo en cada partida (Promedio, Mínimo y Máximo)."
+                        className="p-2.5 rounded bg-[#120f0d] border border-[#3a322a]"
+                      >
                         <span className="block font-display text-[10px] text-[#f3d46b] uppercase">
                           Cartas Jugadas
                         </span>
@@ -540,7 +710,10 @@ export const AiVsAiSimulatorModal: React.FC<AiVsAiSimulatorModalProps> = ({
                         </span>
                       </div>
 
-                      <div className="p-2.5 rounded bg-[#120f0d] border border-[#3a322a]">
+                      <div
+                        title="Cantidad de cartas que le quedaron en la mano a este mazo al terminar la partida (Promedio, Mínimo y Máximo)."
+                        className="p-2.5 rounded bg-[#120f0d] border border-[#3a322a]"
+                      >
                         <span className="block font-display text-[10px] text-[#93c5fd] uppercase">
                           Cartas en Mano (Fin)
                         </span>
@@ -553,7 +726,10 @@ export const AiVsAiSimulatorModal: React.FC<AiVsAiSimulatorModalProps> = ({
                         </span>
                       </div>
 
-                      <div className="p-2.5 rounded bg-[#120f0d] border border-[#3a322a]">
+                      <div
+                        title="Puntos de Desarrollo alcanzados por este mazo al finalizar cada partida (Promedio, Mínimo y Máximo)."
+                        className="p-2.5 rounded bg-[#120f0d] border border-[#3a322a]"
+                      >
                         <span className="block font-display text-[10px] text-[#86efac] uppercase">
                           Puntos Desarrollo
                         </span>
@@ -578,11 +754,47 @@ export const AiVsAiSimulatorModal: React.FC<AiVsAiSimulatorModalProps> = ({
                     <h3 className="font-display text-sm font-bold text-[#f3ead8]">
                       Métricas por Carta ({displayedCards.length})
                     </h3>
+                    <button
+                      type="button"
+                      onClick={() => toggleHelpKey('tableColumns')}
+                      className="text-xs font-display text-[#f3d46b] hover:text-white flex items-center gap-1 ml-2 px-2 py-0.5 rounded bg-[#120f0d] border border-[#574c3f]"
+                    >
+                      <Info className="w-3.5 h-3.5" />
+                      Explicación de columnas
+                      {isHelpOpen('tableColumns') ? (
+                        <ChevronUp className="w-3 h-3" />
+                      ) : (
+                        <ChevronDown className="w-3 h-3" />
+                      )}
+                    </button>
                   </div>
                   <span className="font-serif italic text-xs text-[#a89b8c]">
                     Hacé clic en los encabezados de columna para ordenar
                   </span>
                 </div>
+
+                {isHelpOpen('tableColumns') && (
+                  <div className="p-3 bg-[#120f0d] border-b border-[#3a322a] grid grid-cols-1 md:grid-cols-3 gap-2 font-serif text-xs text-[#e7dfd3]">
+                    <div>
+                      • <strong className="text-[#f3d46b]">Veces Jugada:</strong> Total de veces que la carta fue jugada en todas las partidas (y en cuántas partidas distintas apareció).
+                    </div>
+                    <div>
+                      • <strong className="text-[#f3d46b]">Prom. Jugadas/Partida:</strong> Cuántas veces en promedio se juega esta carta por cada partida simulada.
+                    </div>
+                    <div>
+                      • <strong className="text-[#f3d46b]">% Victoria al Jugarse:</strong> En qué porcentaje de las partidas donde se jugó al menos 1 copia de esta carta terminó ganando su dueño.
+                    </div>
+                    <div>
+                      • <strong className="text-[#f3d46b]">Daño Total:</strong> Suma de todo el daño que esta carta hizo a cartas enemigas en toda la simulación.
+                    </div>
+                    <div>
+                      • <strong className="text-[#f3d46b]">Daño Prom / Mín / Máx:</strong> Daño promedio, mínimo y máximo hecho por esta carta en una partida, más el daño promedio cada vez que se juega.
+                    </div>
+                    <div>
+                      • <strong className="text-[#f3d46b]">Bajas:</strong> Cantidad total de unidades enemigas destruidas por ataques o efectos de esta carta.
+                    </div>
+                  </div>
+                )}
 
                 <div className="overflow-x-auto">
                   <table className="w-full text-left border-collapse text-xs">
@@ -590,6 +802,7 @@ export const AiVsAiSimulatorModal: React.FC<AiVsAiSimulatorModalProps> = ({
                       <tr className="border-b border-[#3a322a] bg-[#120f0d] font-display text-[10px] uppercase text-[#c59b27]">
                         <th className="py-2.5 px-3">Carta</th>
                         <th
+                          title="Total de veces que la carta fue jugada sumando todas las partidas (y en cuántas partidas se jugó al menos una vez)."
                           onClick={() => toggleSort('timesPlayed')}
                           className="py-2.5 px-3 cursor-pointer hover:text-[#fef08a]"
                         >
@@ -597,6 +810,7 @@ export const AiVsAiSimulatorModal: React.FC<AiVsAiSimulatorModalProps> = ({
                           {sortField === 'timesPlayed' ? (sortAsc ? '↑' : '↓') : ''}
                         </th>
                         <th
+                          title="Promedio de veces que se jugó esta carta por cada partida simulada."
                           onClick={() => toggleSort('avgPlaysPerGame')}
                           className="py-2.5 px-3 cursor-pointer hover:text-[#fef08a]"
                         >
@@ -604,6 +818,7 @@ export const AiVsAiSimulatorModal: React.FC<AiVsAiSimulatorModalProps> = ({
                           {sortField === 'avgPlaysPerGame' ? (sortAsc ? '↑' : '↓') : ''}
                         </th>
                         <th
+                          title="Porcentaje de victorias en las partidas en las que esta carta fue jugada al menos una vez."
                           onClick={() => toggleSort('winRateWhenPlayed')}
                           className="py-2.5 px-3 cursor-pointer hover:text-[#fef08a]"
                         >
@@ -611,6 +826,7 @@ export const AiVsAiSimulatorModal: React.FC<AiVsAiSimulatorModalProps> = ({
                           {sortField === 'winRateWhenPlayed' ? (sortAsc ? '↑' : '↓') : ''}
                         </th>
                         <th
+                          title="Daño total acumulado que esta carta infligió a unidades enemigas en todas las partidas."
                           onClick={() => toggleSort('totalDamage')}
                           className="py-2.5 px-3 cursor-pointer hover:text-[#fef08a]"
                         >
@@ -618,12 +834,14 @@ export const AiVsAiSimulatorModal: React.FC<AiVsAiSimulatorModalProps> = ({
                           {sortField === 'totalDamage' ? (sortAsc ? '↑' : '↓') : ''}
                         </th>
                         <th
+                          title="Daño promedio, mínimo y máximo infligido por esta carta en una partida, y promedio de daño por cada vez que se jugó."
                           onClick={() => toggleSort('avgDamage')}
                           className="py-2.5 px-3 cursor-pointer hover:text-[#fef08a]"
                         >
                           Daño Prom / Mín / Máx (Partida)
                         </th>
                         <th
+                          title="Cantidad total de unidades enemigas destruidas por esta carta."
                           onClick={() => toggleSort('totalKills')}
                           className="py-2.5 px-3 cursor-pointer hover:text-[#fef08a]"
                         >

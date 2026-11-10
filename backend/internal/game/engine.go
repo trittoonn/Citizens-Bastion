@@ -3,6 +3,7 @@ package game
 import (
 	"fmt"
 	"math/rand"
+	"sort"
 	"time"
 )
 
@@ -21,6 +22,7 @@ func NewGameStateWithSeed(id, gameName string, rules GameRulesConfig, seed int64
 		ResumePhase:  PhaseWaitingForPlayers,
 		Log:          []LogEntry{},
 		StateVersion: 1,
+		Telemetry:    NewMatchTelemetry(),
 		rng:          rand.New(rand.NewSource(seed)),
 	}
 }
@@ -55,6 +57,10 @@ func (g *GameState) recordTelemetryPlay(playerIdx int, def CardDefinition) {
 	}
 	if playerIdx >= 0 && playerIdx < 2 {
 		g.Telemetry.CardsPlayedBySlot[playerIdx]++
+		if g.Telemetry.PlaysBySlotCard[playerIdx] == nil {
+			g.Telemetry.PlaysBySlotCard[playerIdx] = make(map[string]int)
+		}
+		g.Telemetry.PlaysBySlotCard[playerIdx][def.ID]++
 	}
 	g.Telemetry.PlaysByCard[def.ID]++
 	g.Telemetry.CardNames[def.ID] = def.Name
@@ -63,14 +69,35 @@ func (g *GameState) recordTelemetryPlay(playerIdx int, def CardDefinition) {
 }
 
 func (g *GameState) recordTelemetryDamage(playerIdx int, cardDefID, cardName string, cardType CardType, dmg int, killed bool) {
-	if g.Telemetry == nil || dmg <= 0 {
+	if g.Telemetry == nil || (dmg <= 0 && !killed) {
 		return
 	}
 	if playerIdx >= 0 && playerIdx < 2 {
-		g.Telemetry.TotalDamageBySlot[playerIdx] += dmg
+		if dmg > 0 {
+			g.Telemetry.TotalDamageBySlot[playerIdx] += dmg
+		}
+		if killed {
+			g.Telemetry.KillsBySlot[playerIdx]++
+		}
+		if cardDefID != "" {
+			if g.Telemetry.DamageBySlotCard[playerIdx] == nil {
+				g.Telemetry.DamageBySlotCard[playerIdx] = make(map[string]int)
+			}
+			if g.Telemetry.KillsBySlotCard[playerIdx] == nil {
+				g.Telemetry.KillsBySlotCard[playerIdx] = make(map[string]int)
+			}
+			if dmg > 0 {
+				g.Telemetry.DamageBySlotCard[playerIdx][cardDefID] += dmg
+			}
+			if killed {
+				g.Telemetry.KillsBySlotCard[playerIdx][cardDefID]++
+			}
+		}
 	}
 	if cardDefID != "" {
-		g.Telemetry.DamageByCard[cardDefID] += dmg
+		if dmg > 0 {
+			g.Telemetry.DamageByCard[cardDefID] += dmg
+		}
 		if cardName != "" {
 			g.Telemetry.CardNames[cardDefID] = cardName
 		}
@@ -1063,8 +1090,13 @@ func (g *GameState) applyDamage(target *CardInstance, dmg int, sourceDesc string
 	return dmg, false
 }
 
-// SubmitPromptTarget resolves a PendingPrompt during PhaseAwaitingInput.
+// SubmitPromptTarget resolves a single-target PendingPrompt during PhaseAwaitingInput.
 func (g *GameState) SubmitPromptTarget(playerID, targetCardID string) error {
+	return g.SubmitPromptTargets(playerID, targetCardID, nil)
+}
+
+// SubmitPromptTargets resolves a single-target or multi-target PendingPrompt during PhaseAwaitingInput.
+func (g *GameState) SubmitPromptTargets(playerID, targetCardID string, targetCardIDs []string) error {
 	if g.Phase != PhaseAwaitingInput || g.PendingPrompt == nil {
 		return fmt.Errorf("no hay ninguna selección pendiente")
 	}
@@ -1072,8 +1104,48 @@ func (g *GameState) SubmitPromptTarget(playerID, targetCardID string) error {
 		return fmt.Errorf("esperando la selección del otro jugador")
 	}
 
+	prompt := g.PendingPrompt
+	if prompt.MultiSelect {
+		selected := targetCardIDs
+		if len(selected) == 0 && targetCardID != "" {
+			selected = []string{targetCardID}
+		}
+
+		validSet := make(map[string]bool, len(prompt.ValidTargetIDs))
+		for _, id := range prompt.ValidTargetIDs {
+			validSet[id] = true
+		}
+
+		seen := make(map[string]bool, len(selected))
+		unique := make([]string, 0, len(selected))
+		for _, id := range selected {
+			if id == "" || seen[id] {
+				continue
+			}
+			if !validSet[id] {
+				return fmt.Errorf("una de las cartas seleccionadas no es válida")
+			}
+			seen[id] = true
+			unique = append(unique, id)
+		}
+
+		if len(unique) < prompt.MinTargets || (prompt.MaxTargets > 0 && len(unique) > prompt.MaxTargets) {
+			return fmt.Errorf("cantidad de cartas seleccionadas inválida (%d)", len(unique))
+		}
+
+		g.PendingPrompt = nil
+		g.executeEffectStepWithTargets(prompt.QueuedStep, unique)
+		g.processEffectQueue(g.ResumePhase)
+		g.bumpVersion()
+		return nil
+	}
+
+	if targetCardID == "" && len(targetCardIDs) == 1 {
+		targetCardID = targetCardIDs[0]
+	}
+
 	valid := false
-	for _, id := range g.PendingPrompt.ValidTargetIDs {
+	for _, id := range prompt.ValidTargetIDs {
 		if id == targetCardID {
 			valid = true
 			break
@@ -1083,7 +1155,6 @@ func (g *GameState) SubmitPromptTarget(playerID, targetCardID string) error {
 		return fmt.Errorf("el objetivo seleccionado no es válido")
 	}
 
-	prompt := g.PendingPrompt
 	g.PendingPrompt = nil
 	g.executeEffectStepWithTarget(prompt.QueuedStep, targetCardID)
 	g.processEffectQueue(g.ResumePhase)
@@ -1140,6 +1211,47 @@ func (g *GameState) processEffectQueue(resumePhase GamePhase) {
 				return
 			}
 			continue
+		}
+
+		if next.Step.Op == EffectCycleHand {
+			ctrl, _, err := g.GetPlayer(next.ControllerID)
+			if err != nil || ctrl == nil || len(ctrl.Hand) == 0 {
+				g.addLog(fmt.Sprintf("%s: no hay cartas en la mano para descartar.", next.SourceCardName))
+				if next.DestroySourceCard && ctrl != nil {
+					g.destroyBoardCard(ctrl, next.SourceCardID)
+				}
+				continue
+			}
+
+			validIDs := make([]string, 0, len(ctrl.Hand))
+			clonedCandidates := make([]CardInstance, 0, len(ctrl.Hand))
+			for _, c := range ctrl.Hand {
+				validIDs = append(validIDs, c.InstanceID)
+				clonedCandidates = append(clonedCandidates, c.Clone())
+			}
+
+			promptText := next.Step.Target.Prompt
+			if promptText == "" {
+				promptText = fmt.Sprintf("%s: Elegí cualquier cantidad de cartas de tu mano para descartar y levantar esa misma cantidad.", next.SourceCardName)
+			}
+
+			g.Phase = PhaseAwaitingInput
+			g.PendingPrompt = &PendingPrompt{
+				PlayerID:       next.ControllerID,
+				SourceCardID:   next.SourceCardID,
+				SourceCardName: next.SourceCardName,
+				PromptText:     promptText,
+				OriginPhase:    resumePhase,
+				TargetZones:    []ZoneID{ZoneHand},
+				TargetOwner:    TargetOwnerSelf,
+				ValidTargetIDs: validIDs,
+				CandidateCards: clonedCandidates,
+				MultiSelect:    true,
+				MinTargets:     0,
+				MaxTargets:     len(validIDs),
+				QueuedStep:     next,
+			}
+			return
 		}
 
 		if next.Step.Target.Requirement == TargetReqSingleCard {
@@ -1378,6 +1490,18 @@ func (g *GameState) completeEndOfTurn() {
 }
 
 func (g *GameState) executeEffectStepWithTarget(qe QueuedEffect, chosenTargetID string) {
+	var ids []string
+	if chosenTargetID != "" {
+		ids = []string{chosenTargetID}
+	}
+	g.executeEffectStepWithTargets(qe, ids)
+}
+
+func (g *GameState) executeEffectStepWithTargets(qe QueuedEffect, chosenTargetIDs []string) {
+	chosenTargetID := ""
+	if len(chosenTargetIDs) > 0 {
+		chosenTargetID = chosenTargetIDs[0]
+	}
 	controller, ctrlIdx, err := g.GetPlayer(qe.ControllerID)
 	if err != nil {
 		return
@@ -1500,14 +1624,31 @@ func (g *GameState) executeEffectStepWithTarget(qe QueuedEffect, chosenTargetID 
 		g.addLog(fmt.Sprintf("%s (%s): levantó %d carta(s).", qe.SourceCardName, controller.Name, drawn))
 
 	case EffectCycleHand:
-		handCopy := append([]*CardInstance{}, controller.Hand...)
-		count := len(handCopy)
-		if count > 0 {
-			for _, hc := range handCopy {
-				g.discardCardFromHand(controller, hc.InstanceID, qe.SourceCardName)
+		if len(chosenTargetIDs) == 0 {
+			g.addLog(fmt.Sprintf("%s (%s) decidió no descartar ninguna carta.", qe.SourceCardName, controller.Name))
+			return
+		}
+		discardedCount := 0
+		for _, id := range chosenTargetIDs {
+			for _, hc := range controller.Hand {
+				if hc.InstanceID == id {
+					g.discardCardFromHand(controller, id, qe.SourceCardName)
+					discardedCount++
+					break
+				}
 			}
-			drawn := g.drawCards(controller, count)
-			g.addLog(fmt.Sprintf("%s (%s) descartó %d carta(s) y levantó %d.", qe.SourceCardName, controller.Name, count, drawn))
+		}
+		if discardedCount > 0 {
+			drawn := g.drawCards(controller, discardedCount)
+			g.addLog(fmt.Sprintf("%s (%s) descartó %d carta(s) elegida(s) y levantó %d.", qe.SourceCardName, controller.Name, discardedCount, drawn))
+			g.recordAnimStep(ActionAnimationEvent{
+				Type:           AnimEffect,
+				ActorID:        controller.ID,
+				ActorName:      controller.Name,
+				CardInstanceID: qe.SourceCardID,
+				CardName:       qe.SourceCardName,
+				BannerText:     fmt.Sprintf("✨ %s (%s) descarta %d carta(s) y levanta %d", qe.SourceCardName, controller.Name, discardedCount, drawn),
+			})
 		}
 
 	case EffectDiscard:
@@ -2241,7 +2382,124 @@ func (g *GameState) BuildPlayerView(playerID string) (*PlayerGameView, error) {
 		WinReason:           g.WinReason,
 		Log:                 g.Log,
 		RecentSteps:         recentSteps,
+		MatchStats:          g.buildMatchStatsView(idx),
 	}, nil
+}
+
+func (g *GameState) buildMatchStatsView(viewerIdx int) *MatchStatsView {
+	if g.Telemetry == nil || viewerIdx < 0 || viewerIdx > 1 {
+		return nil
+	}
+	t := g.Telemetry
+	buildPlayerStats := func(slot int) PlayerMatchStatsView {
+		p := g.Players[slot]
+		if p == nil {
+			return PlayerMatchStatsView{
+				CardBreakdown: []MatchCardStatView{},
+			}
+		}
+		cardSet := make(map[string]bool)
+		for cid := range t.PlaysBySlotCard[slot] {
+			cardSet[cid] = true
+		}
+		for cid := range t.DamageBySlotCard[slot] {
+			cardSet[cid] = true
+		}
+		for cid := range t.KillsBySlotCard[slot] {
+			cardSet[cid] = true
+		}
+		breakdown := make([]MatchCardStatView, 0, len(cardSet))
+		for cid := range cardSet {
+			name := t.CardNames[cid]
+			if name == "" {
+				name = cid
+			}
+			ctype := t.CardTypes[cid]
+			if ctype == "" {
+				ctype = CardTypeCitizen
+			}
+			breakdown = append(breakdown, MatchCardStatView{
+				CardID:      cid,
+				CardName:    name,
+				CardType:    ctype,
+				OwnerID:     p.ID,
+				OwnerName:   p.Name,
+				TimesPlayed: t.PlaysBySlotCard[slot][cid],
+				DamageDealt: t.DamageBySlotCard[slot][cid],
+				Kills:       t.KillsBySlotCard[slot][cid],
+			})
+		}
+		sort.Slice(breakdown, func(i, j int) bool {
+			if breakdown[i].DamageDealt != breakdown[j].DamageDealt {
+				return breakdown[i].DamageDealt > breakdown[j].DamageDealt
+			}
+			if breakdown[i].TimesPlayed != breakdown[j].TimesPlayed {
+				return breakdown[i].TimesPlayed > breakdown[j].TimesPlayed
+			}
+			return breakdown[i].CardName < breakdown[j].CardName
+		})
+
+		return PlayerMatchStatsView{
+			PlayerID:          p.ID,
+			PlayerName:        p.Name,
+			WentFirst:         t.FirstPlayerIdx == slot,
+			DevelopmentPoints: p.DevelopmentPoints,
+			CitizensAtEnd:     p.TotalCitizensOnBoard(),
+			CardsPlayed:       t.CardsPlayedBySlot[slot],
+			DamageDealt:       t.TotalDamageBySlot[slot],
+			EnemyUnitsKilled:  t.KillsBySlot[slot],
+			CardsInHand:       len(p.Hand),
+			CardsInDeck:       len(p.Deck),
+			CardsInDiscard:    len(p.Discard),
+			CardsInExile:      len(p.Exile),
+			CardBreakdown:     breakdown,
+		}
+	}
+
+	youStats := buildPlayerStats(viewerIdx)
+	oppStats := buildPlayerStats(1 - viewerIdx)
+
+	firstID := ""
+	firstName := ""
+	if t.FirstPlayerIdx >= 0 && t.FirstPlayerIdx < 2 && g.Players[t.FirstPlayerIdx] != nil {
+		firstID = g.Players[t.FirstPlayerIdx].ID
+		firstName = g.Players[t.FirstPlayerIdx].Name
+	}
+
+	var allCards []MatchCardStatView
+	allCards = append(allCards, youStats.CardBreakdown...)
+	allCards = append(allCards, oppStats.CardBreakdown...)
+
+	var topDmg *MatchCardStatView
+	var mostPlayed *MatchCardStatView
+	var mostLethal *MatchCardStatView
+
+	for i := range allCards {
+		c := allCards[i]
+		if c.DamageDealt > 0 && (topDmg == nil || c.DamageDealt > topDmg.DamageDealt) {
+			cp := c
+			topDmg = &cp
+		}
+		if c.TimesPlayed > 0 && (mostPlayed == nil || c.TimesPlayed > mostPlayed.TimesPlayed) {
+			cp := c
+			mostPlayed = &cp
+		}
+		if c.Kills > 0 && (mostLethal == nil || c.Kills > mostLethal.Kills) {
+			cp := c
+			mostLethal = &cp
+		}
+	}
+
+	return &MatchStatsView{
+		TotalTurns:      g.TurnNumber,
+		FirstPlayerID:   firstID,
+		FirstPlayerName: firstName,
+		You:             youStats,
+		Opponent:        oppStats,
+		TopDamageCard:   topDmg,
+		MostPlayedCard:  mostPlayed,
+		MostLethalCard:  mostLethal,
+	}
 }
 
 func zoneDisplayName(z ZoneID) string {

@@ -159,6 +159,9 @@ func TestHTTPFullMatchAndCustomCardFlow(t *testing.T) {
 	if viewAfterEnd.Phase != game.PhaseGameOver || viewAfterEnd.WinnerID != "player_1" {
 		t.Fatalf("expected GAME_OVER with winner player_1, got phase=%s winner=%s", viewAfterEnd.Phase, viewAfterEnd.WinnerID)
 	}
+	if viewAfterEnd.MatchStats == nil || viewAfterEnd.MatchStats.FirstPlayerID != "player_1" || viewAfterEnd.MatchStats.Opponent.CardsPlayed != 1 {
+		t.Fatalf("expected MatchStats with FirstPlayerID=player_1 and Opponent.CardsPlayed=1, got %+v", viewAfterEnd.MatchStats)
+	}
 }
 
 func TestStaticServingSPAAndPermissiveCORS(t *testing.T) {

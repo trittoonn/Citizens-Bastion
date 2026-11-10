@@ -100,7 +100,10 @@ type PendingPrompt struct {
 	TargetZones    []ZoneID       `json:"targetZones"`
 	TargetOwner    TargetOwner    `json:"targetOwner"`
 	ValidTargetIDs []string       `json:"validTargetIds"`
-	CandidateCards []CardInstance `json:"candidateCards"` // Populated so UI can show Deck/Discard modals
+	CandidateCards []CardInstance `json:"candidateCards"` // Populated so UI can show Deck/Discard/Hand modals
+	MultiSelect    bool           `json:"multiSelect,omitempty"`
+	MinTargets     int            `json:"minTargets,omitempty"`
+	MaxTargets     int            `json:"maxTargets,omitempty"`
 	QueuedStep     QueuedEffect   `json:"-"`
 }
 
@@ -165,14 +168,18 @@ type ActionStepSnapshot struct {
 	IsYourTurn     bool                 `json:"isYourTurn"`
 }
 
-// MatchTelemetry collects per-match statistics for AI vs AI simulations.
+// MatchTelemetry collects per-match statistics for PvP, Player vs AI, and AI vs AI simulations.
 type MatchTelemetry struct {
 	FirstPlayerIdx    int
 	CardsPlayedBySlot [2]int
 	TotalDamageBySlot [2]int
+	KillsBySlot       [2]int
 	PlaysByCard       map[string]int
 	DamageByCard      map[string]int
 	KillsByCard       map[string]int
+	PlaysBySlotCard   [2]map[string]int
+	DamageBySlotCard  [2]map[string]int
+	KillsBySlotCard   [2]map[string]int
 	CardNames         map[string]string
 	CardTypes         map[string]CardType
 	PlayedByWinner    map[string]bool
@@ -186,11 +193,64 @@ func NewMatchTelemetry() *MatchTelemetry {
 		PlaysByCard:    make(map[string]int),
 		DamageByCard:   make(map[string]int),
 		KillsByCard:    make(map[string]int),
+		PlaysBySlotCard: [2]map[string]int{
+			make(map[string]int),
+			make(map[string]int),
+		},
+		DamageBySlotCard: [2]map[string]int{
+			make(map[string]int),
+			make(map[string]int),
+		},
+		KillsBySlotCard: [2]map[string]int{
+			make(map[string]int),
+			make(map[string]int),
+		},
 		CardNames:      make(map[string]string),
 		CardTypes:      make(map[string]CardType),
 		PlayedByWinner: make(map[string]bool),
 		PlayedInMatch:  make(map[string]bool),
 	}
+}
+
+// MatchCardStatView holds per-card telemetry for a single match.
+type MatchCardStatView struct {
+	CardID      string   `json:"cardId"`
+	CardName    string   `json:"cardName"`
+	CardType    CardType `json:"cardType"`
+	OwnerID     string   `json:"ownerId"`
+	OwnerName   string   `json:"ownerName"`
+	TimesPlayed int      `json:"timesPlayed"`
+	DamageDealt int      `json:"damageDealt"`
+	Kills       int      `json:"kills"`
+}
+
+// PlayerMatchStatsView holds aggregated match telemetry for one player in a match.
+type PlayerMatchStatsView struct {
+	PlayerID          string              `json:"playerId"`
+	PlayerName        string              `json:"playerName"`
+	WentFirst         bool                `json:"wentFirst"`
+	DevelopmentPoints int                 `json:"developmentPoints"`
+	CitizensAtEnd     int                 `json:"citizensAtEnd"`
+	CardsPlayed       int                 `json:"cardsPlayed"`
+	DamageDealt       int                 `json:"damageDealt"`
+	EnemyUnitsKilled  int                 `json:"enemyUnitsKilled"`
+	CardsInHand       int                 `json:"cardsInHand"`
+	CardsInDeck       int                 `json:"cardsInDeck"`
+	CardsInDiscard    int                 `json:"cardsInDiscard"`
+	CardsInExile      int                 `json:"cardsInExile"`
+	CardBreakdown     []MatchCardStatView `json:"cardBreakdown"`
+}
+
+// MatchStatsView is the complete telemetry summary for a match.
+type MatchStatsView struct {
+	TotalTurns      int                  `json:"totalTurns"`
+	FirstPlayerID   string               `json:"firstPlayerId"`
+	FirstPlayerName string               `json:"firstPlayerName"`
+	You             PlayerMatchStatsView `json:"you"`
+	Opponent        PlayerMatchStatsView `json:"opponent"`
+	TopDamageCard   *MatchCardStatView   `json:"topDamageCard,omitempty"`
+	MostPlayedCard  *MatchCardStatView   `json:"mostPlayedCard,omitempty"`
+	MostLethalCard  *MatchCardStatView   `json:"mostLethalCard,omitempty"`
 }
 
 // GameState is the authoritative state of a match.
@@ -259,4 +319,5 @@ type PlayerGameView struct {
 	WinReason           string               `json:"winReason,omitempty"`
 	Log                 []LogEntry           `json:"log"`
 	RecentSteps         []ActionStepSnapshot `json:"recentSteps,omitempty"`
+	MatchStats          *MatchStatsView      `json:"matchStats,omitempty"`
 }

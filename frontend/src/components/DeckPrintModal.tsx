@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { FileDown, Printer, Ruler, Sparkles, X } from 'lucide-react';
+import { FileDown, Grid, Printer, Ruler, Sparkles, X } from 'lucide-react';
 import { CardDefinition, DeckPreset } from '../types/game';
 import { CardArt } from './CardArt';
 import { renderCardIcon } from './CardView';
@@ -10,21 +10,108 @@ interface DeckPrintModalProps {
   onClose: () => void;
 }
 
-type CardSizePresetId = 'standard' | 'japanese' | 'mini' | 'tarot' | 'custom';
+type LayoutPresetId =
+  | 'grid_2x2'
+  | 'grid_3x2'
+  | 'grid_4x2'
+  | 'grid_2x3'
+  | 'grid_3x3'
+  | 'grid_4x3'
+  | 'grid_4x4'
+  | 'grid_custom'
+  | 'mm_standard'
+  | 'mm_japanese'
+  | 'mm_tarot'
+  | 'mm_custom';
 
-interface CardSizePreset {
-  id: CardSizePresetId;
+interface LayoutPreset {
+  id: LayoutPresetId;
   label: string;
-  widthMm: number;
-  heightMm: number;
+  mode: 'grid' | 'mm';
+  rows?: number;
+  cols?: number;
+  widthMm?: number;
+  heightMm?: number;
 }
 
-const CARD_SIZE_PRESETS: CardSizePreset[] = [
-  { id: 'standard', label: 'Estándar TCG (63×88 mm • 3×3)', widthMm: 63, heightMm: 88 },
-  { id: 'japanese', label: 'Pequeño / Yu-Gi-Oh (59×86 mm • 3×3)', widthMm: 59, heightMm: 86 },
-  { id: 'mini', label: 'Mini / Compacto (48×68 mm • 4×3)', widthMm: 48, heightMm: 68 },
-  { id: 'tarot', label: 'Tarot / Grande (70×110 mm • 2×2)', widthMm: 70, heightMm: 110 },
-  { id: 'custom', label: 'Personalizado (mm)', widthMm: 63, heightMm: 88 },
+const LAYOUT_PRESETS: LayoutPreset[] = [
+  {
+    id: 'grid_3x3',
+    label: 'Grilla 3×3 — 9 cartas/hoja (Estándar TCG 63×88 mm)',
+    mode: 'mm',
+    widthMm: 63,
+    heightMm: 88,
+  },
+  {
+    id: 'grid_4x2',
+    label: 'Grilla 4×2 — 8 cartas grandes/hoja (4 filas × 2 cols)',
+    mode: 'grid',
+    rows: 4,
+    cols: 2,
+  },
+  {
+    id: 'grid_3x2',
+    label: 'Grilla 3×2 — 6 cartas grandes/hoja (3 filas × 2 cols)',
+    mode: 'grid',
+    rows: 3,
+    cols: 2,
+  },
+  {
+    id: 'grid_2x2',
+    label: 'Grilla 2×2 — 4 cartas gigantes/hoja (2 filas × 2 cols)',
+    mode: 'grid',
+    rows: 2,
+    cols: 2,
+  },
+  {
+    id: 'grid_2x3',
+    label: 'Grilla 2×3 — 6 cartas altas/hoja (2 filas × 3 cols)',
+    mode: 'grid',
+    rows: 2,
+    cols: 3,
+  },
+  {
+    id: 'grid_4x3',
+    label: 'Grilla 4×3 — 12 cartas medianas/hoja (4 filas × 3 cols)',
+    mode: 'grid',
+    rows: 4,
+    cols: 3,
+  },
+  {
+    id: 'grid_4x4',
+    label: 'Grilla 4×4 — 16 cartas compactas/hoja (4 filas × 4 cols)',
+    mode: 'grid',
+    rows: 4,
+    cols: 4,
+  },
+  {
+    id: 'grid_custom',
+    label: 'Grilla Personalizada (Elegir Filas × Columnas)',
+    mode: 'grid',
+    rows: 4,
+    cols: 2,
+  },
+  {
+    id: 'mm_japanese',
+    label: 'Medida Yu-Gi-Oh (59×86 mm • 3×3)',
+    mode: 'mm',
+    widthMm: 59,
+    heightMm: 86,
+  },
+  {
+    id: 'mm_tarot',
+    label: 'Medida Tarot Grande (70×110 mm • 2×2)',
+    mode: 'mm',
+    widthMm: 70,
+    heightMm: 110,
+  },
+  {
+    id: 'mm_custom',
+    label: 'Medida Personalizada en milímetros (Ancho × Alto mm)',
+    mode: 'mm',
+    widthMm: 63,
+    heightMm: 88,
+  },
 ];
 
 const RECRUIT_TOKEN_CARD: CardDefinition = {
@@ -54,7 +141,9 @@ export const DeckPrintModal: React.FC<DeckPrintModalProps> = ({ deck, onClose })
   const [extraRecruitTokens, setExtraRecruitTokens] = useState<number>(0);
   const [extraZombieTokens, setExtraZombieTokens] = useState<number>(0);
   const [showCutGuides, setShowCutGuides] = useState(true);
-  const [sizePreset, setSizePreset] = useState<CardSizePresetId>('standard');
+  const [layoutPreset, setLayoutPreset] = useState<LayoutPresetId>('grid_3x3');
+  const [customRows, setCustomRows] = useState<number>(4);
+  const [customCols, setCustomCols] = useState<number>(2);
   const [customWidthMm, setCustomWidthMm] = useState<number>(63);
   const [customHeightMm, setCustomHeightMm] = useState<number>(88);
   const printSheetsRef = useRef<HTMLDivElement>(null);
@@ -67,37 +156,59 @@ export const DeckPrintModal: React.FC<DeckPrintModalProps> = ({ deck, onClose })
     };
   }, []);
 
-  const activeDimensions = useMemo(() => {
-    if (sizePreset === 'custom') {
-      const w = Math.max(35, Math.min(95, Number(customWidthMm) || 63));
-      const h = Math.max(50, Math.min(135, Number(customHeightMm) || 88));
-      return { widthMm: w, heightMm: h };
-    }
-    const found = CARD_SIZE_PRESETS.find((p) => p.id === sizePreset) || CARD_SIZE_PRESETS[0];
-    return { widthMm: found.widthMm, heightMm: found.heightMm };
-  }, [sizePreset, customWidthMm, customHeightMm]);
-
-  // Calculate how many columns and rows fit comfortably inside an A4 portrait page (210x297mm)
+  // Calculate grid (cols, rows) and exact card dimensions in mm for an A4 portrait page (210x297mm)
   // Usable printable area with 7mm padding + header/footer: ~196mm width x 272mm height
   const gridMetrics = useMemo(() => {
     const gapMm = 2;
     const usableWidthMm = 196;
     const usableHeightMm = 272;
-    const cols = Math.max(
-      1,
-      Math.floor((usableWidthMm + gapMm) / (activeDimensions.widthMm + gapMm))
-    );
-    const rows = Math.max(
-      1,
-      Math.floor((usableHeightMm + gapMm) / (activeDimensions.heightMm + gapMm))
-    );
+    const selectedPreset =
+      LAYOUT_PRESETS.find((p) => p.id === layoutPreset) || LAYOUT_PRESETS[0];
+
+    let cols = 3;
+    let rows = 3;
+    let widthMm = 63;
+    let heightMm = 88;
+
+    if (selectedPreset.mode === 'grid') {
+      rows =
+        layoutPreset === 'grid_custom'
+          ? Math.max(1, Math.min(6, Number(customRows) || 4))
+          : selectedPreset.rows || 4;
+      cols =
+        layoutPreset === 'grid_custom'
+          ? Math.max(1, Math.min(5, Number(customCols) || 2))
+          : selectedPreset.cols || 2;
+
+      widthMm = Math.floor((usableWidthMm - gapMm * (cols - 1)) / cols);
+      heightMm = Math.floor((usableHeightMm - gapMm * (rows - 1)) / rows);
+    } else {
+      widthMm =
+        layoutPreset === 'mm_custom'
+          ? Math.max(35, Math.min(95, Number(customWidthMm) || 63))
+          : selectedPreset.widthMm || 63;
+      heightMm =
+        layoutPreset === 'mm_custom'
+          ? Math.max(45, Math.min(135, Number(customHeightMm) || 88))
+          : selectedPreset.heightMm || 88;
+
+      cols = Math.max(1, Math.floor((usableWidthMm + gapMm) / (widthMm + gapMm)));
+      rows = Math.max(1, Math.floor((usableHeightMm + gapMm) / (heightMm + gapMm)));
+    }
+
     const cardsPerPage = cols * rows;
-    const scaleFactor = Math.min(
-      activeDimensions.widthMm / 63,
-      activeDimensions.heightMm / 88
-    );
-    return { cols, rows, cardsPerPage, gapMm, scaleFactor };
-  }, [activeDimensions]);
+    const scaleFactor = Math.min(widthMm / 63, heightMm / 88);
+    return {
+      cols,
+      rows,
+      widthMm,
+      heightMm,
+      cardsPerPage,
+      gapMm,
+      scaleFactor,
+      mode: selectedPreset.mode,
+    };
+  }, [layoutPreset, customRows, customCols, customWidthMm, customHeightMm]);
 
   // Build the flat list of every card instance in the deck + any requested tokens
   const allCardInstances = useMemo(() => {
@@ -152,32 +263,62 @@ export const DeckPrintModal: React.FC<DeckPrintModalProps> = ({ deck, onClose })
               {extraRecruitTokens > 0 ? ` + ${extraRecruitTokens} Reclutas` : ''}
               {extraZombieTokens > 0 ? ` + ${extraZombieTokens} Zombies` : ''}) •{' '}
               {pages.length} {pages.length === 1 ? 'hoja A4' : 'hojas A4'} (Grilla{' '}
-              {gridMetrics.cols}×{gridMetrics.rows} • {activeDimensions.widthMm}×
-              {activeDimensions.heightMm}mm)
+              {gridMetrics.rows}×{gridMetrics.cols} = {gridMetrics.cardsPerPage} cartas/hoja •{' '}
+              {gridMetrics.widthMm}×{gridMetrics.heightMm}mm)
             </p>
           </div>
         </div>
 
         {/* Print Options */}
         <div className="flex flex-wrap items-center gap-2.5">
-          {/* Card Size Selector */}
+          {/* Grid / Card Size Selector */}
           <div className="flex items-center gap-1.5 bg-[#120f0d] px-2.5 py-1 rounded border border-[#574c3f]">
-            <Ruler className="w-3.5 h-3.5 text-[#f3d46b]" />
+            {gridMetrics.mode === 'grid' ? (
+              <Grid className="w-3.5 h-3.5 text-[#f3d46b]" />
+            ) : (
+              <Ruler className="w-3.5 h-3.5 text-[#f3d46b]" />
+            )}
             <span className="font-display text-[10px] font-bold text-[#d6c7b8]">
-              Tamaño:
+              Grilla / Tamaño:
             </span>
             <select
-              value={sizePreset}
-              onChange={(e) => setSizePreset(e.target.value as CardSizePresetId)}
+              value={layoutPreset}
+              onChange={(e) => setLayoutPreset(e.target.value as LayoutPresetId)}
               className="bg-[#1c1713] border border-[#574c3f] rounded px-2 py-0.5 text-[11px] font-display text-[#f3ead8] focus:outline-none focus:border-[#c59b27]"
             >
-              {CARD_SIZE_PRESETS.map((p) => (
+              {LAYOUT_PRESETS.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.label}
                 </option>
               ))}
             </select>
-            {sizePreset === 'custom' && (
+
+            {layoutPreset === 'grid_custom' && (
+              <div className="flex items-center gap-1 ml-1">
+                <span className="text-[10px] text-[#a89b8c]">Filas:</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={6}
+                  value={customRows}
+                  onChange={(e) => setCustomRows(Number(e.target.value))}
+                  className="w-11 bg-[#1c1713] border border-[#6b5a48] rounded px-1 py-0.5 text-[11px] text-center text-[#fef08a]"
+                  title="Filas por hoja (1-6)"
+                />
+                <span className="text-[10px] text-[#a89b8c]">× Cols:</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={5}
+                  value={customCols}
+                  onChange={(e) => setCustomCols(Number(e.target.value))}
+                  className="w-11 bg-[#1c1713] border border-[#6b5a48] rounded px-1 py-0.5 text-[11px] text-center text-[#fef08a]"
+                  title="Columnas por hoja (1-5)"
+                />
+              </div>
+            )}
+
+            {layoutPreset === 'mm_custom' && (
               <div className="flex items-center gap-1 ml-1">
                 <input
                   type="number"
@@ -191,12 +332,12 @@ export const DeckPrintModal: React.FC<DeckPrintModalProps> = ({ deck, onClose })
                 <span className="text-[10px] text-[#a89b8c]">×</span>
                 <input
                   type="number"
-                  min={50}
+                  min={45}
                   max={135}
                   value={customHeightMm}
                   onChange={(e) => setCustomHeightMm(Number(e.target.value))}
                   className="w-12 bg-[#1c1713] border border-[#6b5a48] rounded px-1 py-0.5 text-[11px] text-center text-[#fef08a]"
-                  title="Alto en mm (50-135mm)"
+                  title="Alto en mm (45-135mm)"
                 />
                 <span className="text-[10px] text-[#a89b8c]">mm</span>
               </div>
@@ -328,9 +469,15 @@ export const DeckPrintModal: React.FC<DeckPrintModalProps> = ({ deck, onClose })
         className="deck-print-sheets-container flex-1 overflow-y-auto p-6 space-y-8 flex flex-col items-center"
       >
         {pages.map((pageCards, pageIdx) => {
-          const artHeightMm = Math.max(16, Math.round(activeDimensions.heightMm * 0.35));
-          const titleFontPt = Math.max(6.5, +(8.5 * gridMetrics.scaleFactor).toFixed(1));
-          const bodyFontPt = Math.max(6, +(7.8 * gridMetrics.scaleFactor).toFixed(1));
+          const artHeightMm = Math.max(15, Math.round(gridMetrics.heightMm * 0.35));
+          const titleFontPt = Math.max(
+            6.5,
+            Math.min(13, +(8.5 * gridMetrics.scaleFactor).toFixed(1))
+          );
+          const bodyFontPt = Math.max(
+            6,
+            Math.min(11.5, +(7.8 * gridMetrics.scaleFactor).toFixed(1))
+          );
 
           return (
             <div
@@ -343,8 +490,9 @@ export const DeckPrintModal: React.FC<DeckPrintModalProps> = ({ deck, onClose })
                   <strong>CITIZENS' BASTION</strong> — Mazo: {deck.name}
                 </span>
                 <span>
-                  Hoja {pageIdx + 1} de {pages.length} ({allCardInstances.length} cartas •{' '}
-                  {activeDimensions.widthMm}×{activeDimensions.heightMm}mm)
+                  Hoja {pageIdx + 1} de {pages.length} ({allCardInstances.length} cartas • Grilla{' '}
+                  {gridMetrics.rows}×{gridMetrics.cols} • {gridMetrics.widthMm}×
+                  {gridMetrics.heightMm}mm)
                 </span>
               </div>
 
@@ -352,8 +500,8 @@ export const DeckPrintModal: React.FC<DeckPrintModalProps> = ({ deck, onClose })
               <div
                 className="grid place-items-center mx-auto"
                 style={{
-                  gridTemplateColumns: `repeat(${gridMetrics.cols}, ${activeDimensions.widthMm}mm)`,
-                  gridTemplateRows: `repeat(${gridMetrics.rows}, ${activeDimensions.heightMm}mm)`,
+                  gridTemplateColumns: `repeat(${gridMetrics.cols}, ${gridMetrics.widthMm}mm)`,
+                  gridTemplateRows: `repeat(${gridMetrics.rows}, ${gridMetrics.heightMm}mm)`,
                   gap: `${gridMetrics.gapMm}mm`,
                 }}
               >
@@ -366,8 +514,8 @@ export const DeckPrintModal: React.FC<DeckPrintModalProps> = ({ deck, onClose })
                       <div
                         key={`empty_${slotIdx}`}
                         style={{
-                          width: `${activeDimensions.widthMm}mm`,
-                          height: `${activeDimensions.heightMm}mm`,
+                          width: `${gridMetrics.widthMm}mm`,
+                          height: `${gridMetrics.heightMm}mm`,
                         }}
                         className="rounded border border-dashed border-gray-200"
                       />
@@ -383,8 +531,8 @@ export const DeckPrintModal: React.FC<DeckPrintModalProps> = ({ deck, onClose })
                     <div
                       key={`${card.id}_${globalCardNumber}`}
                       style={{
-                        width: `${activeDimensions.widthMm}mm`,
-                        height: `${activeDimensions.heightMm}mm`,
+                        width: `${gridMetrics.widthMm}mm`,
+                        height: `${gridMetrics.heightMm}mm`,
                         WebkitPrintColorAdjust: 'exact',
                         printColorAdjust: 'exact',
                       }}
@@ -516,8 +664,8 @@ export const DeckPrintModal: React.FC<DeckPrintModalProps> = ({ deck, onClose })
               {/* Sheet Footer */}
               <div className="pt-1 mt-1.5 border-t border-[#d6c7b8] flex items-center justify-between text-[7pt] font-serif text-[#6e6053]">
                 <span>
-                  Recortá por las guías punteadas ({activeDimensions.widthMm}×
-                  {activeDimensions.heightMm}mm • Grilla {gridMetrics.cols}×{gridMetrics.rows}).
+                  Recortá por las guías punteadas ({gridMetrics.widthMm}×
+                  {gridMetrics.heightMm}mm • Grilla {gridMetrics.rows}×{gridMetrics.cols}).
                 </span>
                 <span>Citizens' Bastion • Reglas 2026 v1</span>
               </div>

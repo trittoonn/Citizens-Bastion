@@ -206,7 +206,7 @@ func (m *Manager) SubmitAction(lobbyID string, req ActionRequest) (*game.PlayerG
 	case ActionActivateAbility:
 		actionErr = entry.state.ActivateCardAbility(req.PlayerID, req.CardInstanceID)
 	case ActionSelectTarget:
-		actionErr = entry.state.SubmitPromptTarget(req.PlayerID, req.TargetCardID)
+		actionErr = entry.state.SubmitPromptTargets(req.PlayerID, req.TargetCardID, req.CardInstanceIDs)
 	case ActionEndTurn:
 		actionErr = entry.state.EndTurn(req.PlayerID)
 	default:

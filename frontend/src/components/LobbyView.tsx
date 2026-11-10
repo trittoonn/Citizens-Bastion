@@ -239,17 +239,9 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
           <button
             type="button"
             onClick={onNavigateDeckBuilder}
-            className="btn-war-iron flex-1 py-2.5 px-3 rounded text-xs"
+            className="btn-war-iron w-full py-2.5 px-3 rounded text-xs"
           >
             Forjar Cartas y Mazos →
-          </button>
-          <button
-            type="button"
-            onClick={() => setShowSimulatorModal(true)}
-            className="btn-war-gold py-2.5 px-3.5 rounded text-xs flex items-center justify-center gap-1.5"
-          >
-            <BarChart3 className="w-4 h-4" />
-            Simulador IA vs IA
           </button>
         </div>
       </div>
@@ -260,6 +252,14 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
         </div>
       )}
 
+      {showSimulatorModal ? (
+        <div className="relative z-10">
+          <AiVsAiSimulatorModal
+            decks={decks}
+            onClose={() => setShowSimulatorModal(false)}
+          />
+        </div>
+      ) : (
       <div className="relative z-10 grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Left 5 Columns: Create New Lobby (PvP or vs AI) */}
         <div className="lg:col-span-5">
@@ -722,12 +722,6 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
           </div>
         </div>
       </div>
-
-      {showSimulatorModal && (
-        <AiVsAiSimulatorModal
-          decks={decks}
-          onClose={() => setShowSimulatorModal(false)}
-        />
       )}
     </div>
   );

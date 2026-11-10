@@ -523,6 +523,34 @@ func TestExpansionCardsAndNewMechanics(t *testing.T) {
 	if mercToken.CurrentVitality != 2 {
 		t.Fatalf("expected Mercenario with Ataque Rápido to take 0 retaliation damage and stay at 2V, got %dV", mercToken.CurrentVitality)
 	}
+
+	// 6. Espidi (3V, Comandante, EffectCycleHand): Player chooses which cards from hand to discard!
+	gs.PlaysRemaining = 5
+	p1.Hand = []*CardInstance{
+		{InstanceID: "p1_espidi", OwnerID: "p1", Definition: cardByID("espidi"), Zone: ZoneHand},
+		{InstanceID: "h_keep", OwnerID: "p1", Definition: cardByID("caballero_galardonado"), Zone: ZoneHand},
+		{InstanceID: "h_disc1", OwnerID: "p1", Definition: cardByID("mensajero"), Zone: ZoneHand},
+		{InstanceID: "h_disc2", OwnerID: "p1", Definition: cardByID("granjero"), Zone: ZoneHand},
+	}
+	if err := gs.PlayCard("p1", "p1_espidi", ZoneRoad); err != nil {
+		t.Fatalf("Play Espidi failed: %v", err)
+	}
+	if gs.Phase != PhaseAwaitingInput || gs.PendingPrompt == nil || !gs.PendingPrompt.MultiSelect {
+		t.Fatalf("expected PhaseAwaitingInput with MultiSelect=true for Espidi, got phase=%s prompt=%+v", gs.Phase, gs.PendingPrompt)
+	}
+	// Player chooses to discard h_disc1 and h_disc2 while keeping h_keep
+	if err := gs.SubmitPromptTargets("p1", "", []string{"h_disc1", "h_disc2"}); err != nil {
+		t.Fatalf("SubmitPromptTargets for Espidi failed: %v", err)
+	}
+	if gs.Phase != PhaseMain {
+		t.Fatalf("expected PhaseMain after resolving Espidi prompt, got %s", gs.Phase)
+	}
+	if len(p1.Hand) != 3 {
+		t.Fatalf("expected 3 cards in hand (1 kept + 2 drawn), got %d", len(p1.Hand))
+	}
+	if p1.Hand[0].InstanceID != "h_keep" {
+		t.Fatalf("expected h_keep to remain in hand, got %s", p1.Hand[0].InstanceID)
+	}
 }
 
 func TestVictoryAtFiveDevelopmentPointsEveryTwoTurns(t *testing.T) {

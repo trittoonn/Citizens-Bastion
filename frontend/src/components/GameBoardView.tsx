@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Archive,
   ArrowLeft,
+  BookOpen,
   Bot,
   Check,
   ChevronDown,
@@ -20,6 +21,7 @@ import {
   Swords,
   Target,
   Users,
+  X,
 } from 'lucide-react';
 import {
   ActionRequest,
@@ -33,6 +35,7 @@ import {
 } from '../types/game';
 import { pollGameState, submitGameAction } from '../services/api';
 import { CardAnimEffect, CardView } from './CardView';
+import { GAME_KEYWORDS, getCardKeywords } from '../utils/keywords';
 
 interface GameBoardViewProps {
   lobbyId: string;
@@ -197,12 +200,24 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
 
   // Collapsible Quick Guide Accordion in the right sidebar (collapsed by default)
   const [guideOpen, setGuideOpen] = useState(false);
+  const [keywordsModalOpen, setKeywordsModalOpen] = useState(false);
+
+  // Multi-select prompt state (e.g. Espidi's "discard any number of cards from hand")
+  const [selectedPromptIds, setSelectedPromptIds] = useState<string[]>([]);
 
   // Discard / Exile Inspector Modal
   const [inspectPile, setInspectPile] = useState<{
     title: string;
     cards: CardInstance[];
   } | null>(null);
+
+  // Post-match statistics modal states
+  const [statsMinimized, setStatsMinimized] = useState(false);
+  const [statsCardTab, setStatsCardTab] = useState<'all' | 'you' | 'opponent'>('all');
+  const [statsSortField, setStatsSortField] = useState<
+    'damageDealt' | 'timesPlayed' | 'kills'
+  >('damageDealt');
+  const [statsShowHelp, setStatsShowHelp] = useState(false);
 
   // Ingest incoming PlayerGameView and enqueue any unseen animation steps
   const ingestIncomingView = useCallback((nextView: PlayerGameView) => {
@@ -308,6 +323,7 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
       ingestIncomingView(next);
       setSelectedHandCardId(null);
       setSelectedBoardCardId(null);
+      setSelectedPromptIds([]);
     } catch (err: any) {
       setError(err.message || 'Acción inválida');
     } finally {
@@ -683,6 +699,14 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
 
         {/* Right: Vitality & Combat Mode Badges & Opponent Reserves */}
         <div className="flex items-center gap-1.5 text-[11px]">
+          <button
+            type="button"
+            onClick={() => setKeywordsModalOpen(true)}
+            title="Ver glosario de palabras clave (Keywords) y sus efectos"
+            className="btn-war-iron flex items-center gap-1 px-2.5 py-0.5 rounded text-[10px] border-[#c59b27]/70 text-[#fef08a]"
+          >
+            <BookOpen className="w-3 h-3 text-[#f3d46b]" /> Keywords
+          </button>
           <span className="hidden md:inline-block px-2 py-0.5 rounded-sm bg-[#1a1613] border border-[#574c3f] text-[#d6c7b8] font-display text-[10px]">
             {view.rules.vitalityMode === 'base_attack' ? 'Fuerza Base' : 'V Dinámica'}
           </span>
@@ -1364,13 +1388,34 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
 
           {/* Magnified TCG Card Preview on Hover (Positioned at top-left, pointer-events-none) */}
           {hoveredCard && (
-            <div className="fixed left-4 top-16 z-50 pointer-events-none">
+            <div className="fixed left-4 top-16 z-50 pointer-events-none flex flex-col gap-2 max-w-[254px]">
               <CardView
                 card={hoveredCard.card}
                 instance={hoveredCard.instance}
                 vitalityMode={view.rules.vitalityMode}
                 size="lg"
               />
+              {(() => {
+                const kws = getCardKeywords(hoveredCard.card);
+                if (kws.length === 0) return null;
+                return (
+                  <div className="rounded-lg bg-[#14100d]/95 border-2 border-[#c59b27] p-2.5 shadow-[0_12px_32px_rgba(0,0,0,0.95)] space-y-1.5">
+                    <div className="font-display text-[9.5px] font-bold uppercase tracking-wider text-[#f3d46b] border-b border-[#574c3f] pb-1">
+                      Palabras Clave (Keywords)
+                    </div>
+                    {kws.map((kw) => (
+                      <div key={kw.id} className="text-[11px] leading-snug">
+                        <span className="font-display font-bold text-[#fef08a]">
+                          {kw.badge}:
+                        </span>{' '}
+                        <span className="font-serif text-[#e7dfd3]">
+                          {kw.description}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
             </div>
           )}
         </div>
@@ -1635,20 +1680,429 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
         </div>
       )}
 
-      {view.phase === 'GAME_OVER' && (
-        <div className="fixed inset-0 z-50 bg-[#0d0b09]/85 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bastion-panel rounded-xl max-w-md w-full p-8 text-center space-y-4 border-2 border-[#f3d46b]">
-            <Crown className="w-14 h-14 text-[#f3d46b] mx-auto" />
-            <h2 className="font-display text-2xl font-black text-[#f3ead8]">
-              {view.winnerId === playerId ? '¡VICTORIA EN EL BASTIÓN!' : 'CAÍDA DEL BASTIÓN'}
-            </h2>
-            <p className="font-serif text-base text-[#f3d46b]">{view.winReason}</p>
-            <button
-              onClick={onExitLobby}
-              className="btn-war-gold w-full py-2.5 rounded text-xs"
-            >
-              Regresar al Salón de Guerra
-            </button>
+      {view.phase === 'GAME_OVER' && statsMinimized && (
+        <div className="fixed bottom-4 right-4 z-50 flex items-center gap-2 p-2.5 rounded-lg bg-[#1c1612] border-2 border-[#f3d46b] shadow-[0_12px_32px_rgba(0,0,0,0.95)]">
+          <Crown className="w-5 h-5 text-[#f3d46b]" />
+          <span className="font-display text-xs font-bold text-[#fef08a]">
+            {view.winnerId === playerId ? '¡Victoria!' : 'Partida Finalizada'}
+          </span>
+          <button
+            type="button"
+            onClick={() => setStatsMinimized(false)}
+            className="btn-war-gold px-3 py-1 rounded text-[11px]"
+          >
+            Ver Estadísticas
+          </button>
+          <button
+            type="button"
+            onClick={onExitLobby}
+            className="btn-war-iron px-3 py-1 rounded text-[11px]"
+          >
+            Salir al Salón
+          </button>
+        </div>
+      )}
+
+      {view.phase === 'GAME_OVER' && !statsMinimized && (
+        <div className="fixed inset-0 z-50 bg-[#090807]/90 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bastion-panel rounded-xl max-w-5xl w-full max-h-[92vh] flex flex-col overflow-hidden border-2 border-[#f3d46b] shadow-[0_24px_64px_rgba(0,0,0,0.95)]">
+            {/* Top Victory/Defeat Header */}
+            <div className="bastion-panel-header px-6 py-4 flex flex-wrap items-center justify-between gap-4 shrink-0">
+              <div className="flex items-center gap-3.5">
+                <div
+                  className={`p-2.5 rounded-lg border-2 ${
+                    view.winnerId === playerId
+                      ? 'bg-gradient-to-b from-[#f3d46b] to-[#966e15] border-[#fef08a] text-[#14100c]'
+                      : 'bg-gradient-to-b from-[#7f1d1d] to-[#450a0a] border-[#f87171] text-[#fecaca]'
+                  }`}
+                >
+                  <Crown className="w-7 h-7" />
+                </div>
+                <div>
+                  <h2 className="font-display text-xl font-black text-[#f3ead8] tracking-wide">
+                    {view.winnerId === playerId
+                      ? '¡VICTORIA EN EL BASTIÓN!'
+                      : 'CAÍDA DEL BASTIÓN'}
+                  </h2>
+                  <p className="font-serif text-sm text-[#f3d46b]">
+                    {view.winReason}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setStatsShowHelp((v) => !v)}
+                  className="btn-war-iron px-3 py-1.5 rounded text-xs flex items-center gap-1 border-[#c59b27]/70 text-[#fef08a]"
+                >
+                  <Info className="w-3.5 h-3.5 text-[#f3d46b]" />
+                  {statsShowHelp ? 'Ocultar explicaciones' : '¿Qué mide cada métrica?'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStatsMinimized(true)}
+                  className="btn-war-iron px-3 py-1.5 rounded text-xs"
+                >
+                  Inspeccionar Tablero Final
+                </button>
+                <button
+                  type="button"
+                  onClick={onExitLobby}
+                  className="btn-war-gold px-4 py-1.5 rounded text-xs"
+                >
+                  Regresar al Salón de Guerra
+                </button>
+              </div>
+            </div>
+
+            {/* Post-Match Statistics Body */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-5">
+              {statsShowHelp && (
+                <div className="p-3.5 rounded-lg bg-[#120f0d] border border-[#c59b27]/60 font-serif text-xs text-[#e7dfd3] grid grid-cols-1 md:grid-cols-3 gap-2 leading-snug">
+                  <div>
+                    • <strong className="text-[#f3d46b]">Mayor Daño / Más Jugada / Más Letal:</strong> Destacan las cartas individuales que más daño acumularon, más veces entraron en juego o más unidades enemigas destruyeron en toda la partida.
+                  </div>
+                  <div>
+                    • <strong className="text-[#f3d46b]">Comparativa de Jugadores:</strong> Muestra lado a lado los Puntos de Desarrollo, Ciudadanos vivos al cerrar, daño total hecho a unidades rivales, cartas jugadas y bajas logradas.
+                  </div>
+                  <div>
+                    • <strong className="text-[#f3d46b]">Desglose por Carta:</strong> Lista todas las cartas jugadas en el duelo con cuántas veces se jugaron, cuánto daño hicieron y cuántas bajas causaron.
+                  </div>
+                </div>
+              )}
+
+              {view.matchStats ? (
+                <>
+                  {/* 1. Match Overview & MVP Highlight Cards */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+                    {/* Match Duration & Starting Player */}
+                    <div
+                      title="Cantidad total de turnos jugados y quién tuvo el primer turno de la partida."
+                      className="p-3.5 rounded-lg bg-[#16120f] border border-[#574c3f] flex flex-col justify-between"
+                    >
+                      <span className="font-display text-[10px] font-bold uppercase text-[#c59b27]">
+                        Ritmo de la Batalla
+                      </span>
+                      <div className="my-1.5">
+                        <div className="font-display text-lg font-black text-[#f3ead8]">
+                          {view.matchStats.totalTurns} Turnos Jugados
+                        </div>
+                        <div className="font-serif text-xs text-[#d6c7b8]">
+                          Salió primero (Turno 1):{' '}
+                          <strong className="text-[#f3d46b]">
+                            {view.matchStats.firstPlayerName || '—'}
+                          </strong>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* MVP 1: Top Damage Card */}
+                    <div
+                      title="La carta que más daño total infligió a unidades enemigas (sumando ataques y habilidades)."
+                      className="p-3.5 rounded-lg bg-[#16120f] border border-[#574c3f] flex flex-col justify-between"
+                    >
+                      <span className="font-display text-[10px] font-bold uppercase text-[#fca5a5]">
+                        ⚔️ Carta con Mayor Daño
+                      </span>
+                      {view.matchStats.topDamageCard ? (
+                        <div className="my-1">
+                          <div className="font-display text-sm font-bold text-[#fef08a] truncate">
+                            {view.matchStats.topDamageCard.cardName}
+                          </div>
+                          <div className="font-serif text-xs text-[#d6c7b8]">
+                            <strong>{view.matchStats.topDamageCard.damageDealt}</strong>{' '}
+                            de daño total ({view.matchStats.topDamageCard.ownerName})
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="font-serif italic text-xs text-[#8c7e70]">
+                          Sin daño registrado
+                        </span>
+                      )}
+                    </div>
+
+                    {/* MVP 2: Most Played Card */}
+                    <div
+                      title="La carta que más veces fue jugada durante la partida."
+                      className="p-3.5 rounded-lg bg-[#16120f] border border-[#574c3f] flex flex-col justify-between"
+                    >
+                      <span className="font-display text-[10px] font-bold uppercase text-[#86efac]">
+                        📜 Carta Más Usada
+                      </span>
+                      {view.matchStats.mostPlayedCard ? (
+                        <div className="my-1">
+                          <div className="font-display text-sm font-bold text-[#fef08a] truncate">
+                            {view.matchStats.mostPlayedCard.cardName}
+                          </div>
+                          <div className="font-serif text-xs text-[#d6c7b8]">
+                            Jugada{' '}
+                            <strong>{view.matchStats.mostPlayedCard.timesPlayed}</strong>{' '}
+                            {view.matchStats.mostPlayedCard.timesPlayed === 1
+                              ? 'vez'
+                              : 'veces'}{' '}
+                            ({view.matchStats.mostPlayedCard.ownerName})
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="font-serif italic text-xs text-[#8c7e70]">
+                          Sin cartas jugadas
+                        </span>
+                      )}
+                    </div>
+
+                    {/* MVP 3: Most Lethal Card */}
+                    <div
+                      title="La carta que destruyó más unidades enemigas durante la partida."
+                      className="p-3.5 rounded-lg bg-[#16120f] border border-[#574c3f] flex flex-col justify-between"
+                    >
+                      <span className="font-display text-[10px] font-bold uppercase text-[#f3d46b]">
+                        💀 Carta Más Letal
+                      </span>
+                      {view.matchStats.mostLethalCard ? (
+                        <div className="my-1">
+                          <div className="font-display text-sm font-bold text-[#fef08a] truncate">
+                            {view.matchStats.mostLethalCard.cardName}
+                          </div>
+                          <div className="font-serif text-xs text-[#d6c7b8]">
+                            <strong>{view.matchStats.mostLethalCard.kills}</strong>{' '}
+                            {view.matchStats.mostLethalCard.kills === 1
+                              ? 'baja enemiga'
+                              : 'bajas enemigas'}{' '}
+                            ({view.matchStats.mostLethalCard.ownerName})
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="font-serif italic text-xs text-[#8c7e70]">
+                          Sin bajas registradas
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* 2. Side-by-Side Player vs Opponent Comparison */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    {[
+                      {
+                        p: view.matchStats.you,
+                        badge: 'border-[#3b82f6] bg-[#172536]/40',
+                        titleColor: 'text-[#93c5fd]',
+                        tag: 'Tu Desempeño',
+                        isWinner: view.winnerId === view.matchStats.you.playerId,
+                      },
+                      {
+                        p: view.matchStats.opponent,
+                        badge: 'border-[#ef4444] bg-[#361515]/40',
+                        titleColor: 'text-[#fca5a5]',
+                        tag: 'Desempeño del Oponente',
+                        isWinner: view.winnerId === view.matchStats.opponent.playerId,
+                      },
+                    ].map(({ p, badge, titleColor, tag, isWinner }) => (
+                      <div
+                        key={tag}
+                        className={`p-4 rounded-lg border ${badge} space-y-3`}
+                      >
+                        <div className="flex items-center justify-between border-b border-[#463c32] pb-2">
+                          <div>
+                            <span className="font-display text-[10px] uppercase tracking-wider text-[#a89b8c]">
+                              {tag} {p.wentFirst ? '• Salió 1º' : '• Salió 2º'}
+                            </span>
+                            <h3 className={`font-display text-base font-bold ${titleColor}`}>
+                              {p.playerName} {isWinner ? '👑' : ''}
+                            </h3>
+                          </div>
+                          <div className="text-right">
+                            <div className="font-display text-lg font-black text-[#fef08a]">
+                              {p.developmentPoints} / {pointsGoal} Pts
+                            </div>
+                            <div className="font-serif text-xs text-[#d6c7b8]">
+                              {p.citizensAtEnd} Ciudadanos en mesa al final
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                          <div
+                            title="Suma total de daño infligido a unidades enemigas durante la partida."
+                            className="p-2.5 rounded bg-[#120f0d] border border-[#3a322a]"
+                          >
+                            <span className="block font-display text-[10px] text-[#fca5a5] uppercase">
+                              Daño Total
+                            </span>
+                            <strong className="font-display text-base text-[#f3ead8]">
+                              {p.damageDealt}
+                            </strong>
+                          </div>
+
+                          <div
+                            title="Cantidad total de cartas jugadas por este jugador en la partida."
+                            className="p-2.5 rounded bg-[#120f0d] border border-[#3a322a]"
+                          >
+                            <span className="block font-display text-[10px] text-[#f3d46b] uppercase">
+                              Cartas Jugadas
+                            </span>
+                            <strong className="font-display text-base text-[#f3ead8]">
+                              {p.cardsPlayed}
+                            </strong>
+                          </div>
+
+                          <div
+                            title="Cantidad de unidades enemigas destruidas por ataques o efectos de este jugador."
+                            className="p-2.5 rounded bg-[#120f0d] border border-[#3a322a]"
+                          >
+                            <span className="block font-display text-[10px] text-[#86efac] uppercase">
+                              Bajas Logradas
+                            </span>
+                            <strong className="font-display text-base text-[#f3ead8]">
+                              {p.enemyUnitsKilled}
+                            </strong>
+                          </div>
+
+                          <div
+                            title="Estado final de reservas al terminar la partida (Mano / Mazo / Descarte / Exilio)."
+                            className="p-2.5 rounded bg-[#120f0d] border border-[#3a322a]"
+                          >
+                            <span className="block font-display text-[10px] text-[#93c5fd] uppercase">
+                              Mano / Mazo Fin
+                            </span>
+                            <strong className="font-display text-sm text-[#f3ead8]">
+                              {p.cardsInHand} en mano
+                            </strong>
+                            <span className="block text-[10px] text-[#a89b8c]">
+                              Mazo: {p.cardsInDeck} • Desc: {p.cardsInDiscard}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* 3. Card Breakdown Table */}
+                  <div className="rounded-lg bg-[#15110e] border border-[#574c3f] overflow-hidden">
+                    <div className="px-4 py-2.5 bg-[#1e1814] border-b border-[#463c32] flex flex-wrap items-center justify-between gap-2">
+                      <span className="font-display text-xs font-bold uppercase text-[#f3d46b]">
+                        Desglose de Cartas Utilizadas en la Batalla
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        {(
+                          [
+                            { id: 'all', label: 'Todas' },
+                            { id: 'you', label: `Tus Cartas (${view.matchStats.you.playerName})` },
+                            {
+                              id: 'opponent',
+                              label: `Rival (${view.matchStats.opponent.playerName})`,
+                            },
+                          ] as const
+                        ).map((tab) => (
+                          <button
+                            key={tab.id}
+                            type="button"
+                            onClick={() => setStatsCardTab(tab.id)}
+                            className={`px-2.5 py-1 rounded font-display text-[10px] font-bold border transition ${
+                              statsCardTab === tab.id
+                                ? 'bg-[#2b2216] border-[#c59b27] text-[#fef08a]'
+                                : 'bg-[#120f0d] border-[#3a322a] text-[#a89b8c] hover:text-[#f3ead8]'
+                            }`}
+                          >
+                            {tab.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="overflow-x-auto max-h-60">
+                      <table className="w-full text-left border-collapse text-xs">
+                        <thead>
+                          <tr className="border-b border-[#3a322a] bg-[#120f0d] font-display text-[10px] uppercase text-[#c59b27]">
+                            <th className="py-2 px-3">Carta</th>
+                            <th className="py-2 px-3">Jugador</th>
+                            <th
+                              onClick={() => setStatsSortField('timesPlayed')}
+                              className="py-2 px-3 cursor-pointer hover:text-[#fef08a]"
+                            >
+                              Veces Jugada {statsSortField === 'timesPlayed' ? '↓' : ''}
+                            </th>
+                            <th
+                              onClick={() => setStatsSortField('damageDealt')}
+                              className="py-2 px-3 cursor-pointer hover:text-[#fef08a]"
+                            >
+                              Daño Infligido {statsSortField === 'damageDealt' ? '↓' : ''}
+                            </th>
+                            <th
+                              onClick={() => setStatsSortField('kills')}
+                              className="py-2 px-3 cursor-pointer hover:text-[#fef08a]"
+                            >
+                              Bajas Enemigas {statsSortField === 'kills' ? '↓' : ''}
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-[#2b241e] font-serif">
+                          {(() => {
+                            const rawList =
+                              statsCardTab === 'you'
+                                ? view.matchStats.you.cardBreakdown
+                                : statsCardTab === 'opponent'
+                                ? view.matchStats.opponent.cardBreakdown
+                                : [
+                                    ...(view.matchStats.you.cardBreakdown || []),
+                                    ...(view.matchStats.opponent.cardBreakdown || []),
+                                  ];
+                            const sorted = [...rawList].sort(
+                              (a, b) =>
+                                Number(b[statsSortField] || 0) -
+                                Number(a[statsSortField] || 0)
+                            );
+                            if (sorted.length === 0) {
+                              return (
+                                <tr>
+                                  <td
+                                    colSpan={5}
+                                    className="py-6 text-center italic text-[#8c7e70]"
+                                  >
+                                    No se registraron cartas jugadas en esta categoría.
+                                  </td>
+                                </tr>
+                              );
+                            }
+                            return sorted.map((c, idx) => (
+                              <tr
+                                key={`${c.ownerId}_${c.cardId}_${idx}`}
+                                className="hover:bg-[#1e1813]"
+                              >
+                                <td className="py-2 px-3">
+                                  <span className="font-display font-bold text-[#f3ead8]">
+                                    {c.cardName}
+                                  </span>{' '}
+                                  <span className="text-[10px] text-[#8c7e70] uppercase font-display ml-1">
+                                    ({c.cardType === 'citizen'
+                                      ? 'Ciudadano'
+                                      : c.cardType === 'tool'
+                                      ? 'Herramienta'
+                                      : 'Evento'})
+                                  </span>
+                                </td>
+                                <td className="py-2 px-3 font-display text-[#d6c7b8]">
+                                  {c.ownerName}
+                                </td>
+                                <td className="py-2 px-3 font-display font-bold text-[#f3d46b]">
+                                  {c.timesPlayed}
+                                </td>
+                                <td className="py-2 px-3 font-display font-bold text-[#fca5a5]">
+                                  {c.damageDealt}
+                                </td>
+                                <td className="py-2 px-3 font-display font-bold text-[#86efac]">
+                                  {c.kills}
+                                </td>
+                              </tr>
+                            ));
+                          })()}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </>
+              ) : null}
+            </div>
           </div>
         </div>
       )}
@@ -1656,36 +2110,161 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
       {isPromptForMe && isOffBoardPrompt && view.pendingPrompt && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0d0b09]/85 backdrop-blur-sm p-4">
           <div className="bastion-panel rounded-lg max-w-4xl w-full p-6 space-y-4 border-2 border-[#f3d46b]">
-            <div className="border-b border-[#6b5a48] pb-3">
-              <span className="font-display text-xs font-bold uppercase text-[#f3d46b]">
-                Efecto en Curso ({view.pendingPrompt.sourceCardName})
-              </span>
-              <h3 className="font-display text-lg font-bold text-[#f3ead8]">
-                {view.pendingPrompt.promptText}
-              </h3>
-            </div>
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#6b5a48] pb-3">
+              <div>
+                <span className="font-display text-xs font-bold uppercase text-[#f3d46b]">
+                  Efecto en Curso ({view.pendingPrompt.sourceCardName})
+                </span>
+                <h3 className="font-display text-lg font-bold text-[#f3ead8]">
+                  {view.pendingPrompt.promptText}
+                </h3>
+              </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 max-h-[65vh] overflow-y-auto p-2">
-              {(view.pendingPrompt.candidateCards || []).map((cand) => (
-                <div key={cand.instanceId} className="flex justify-center">
-                  <CardView
-                    card={cand.definition}
-                    instance={cand}
-                    vitalityMode={view.rules.vitalityMode}
-                    size="md"
-                    isTargetable
+              {view.pendingPrompt.multiSelect && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={submitting}
+                    onClick={() => {
+                      const allIds = (view.pendingPrompt?.candidateCards || []).map(
+                        (c) => c.instanceId
+                      );
+                      if (selectedPromptIds.length === allIds.length) {
+                        setSelectedPromptIds([]);
+                      } else {
+                        setSelectedPromptIds(allIds);
+                      }
+                    }}
+                    className="btn-war-iron px-3 py-1.5 rounded text-xs"
+                  >
+                    {selectedPromptIds.length ===
+                    (view.pendingPrompt.candidateCards || []).length
+                      ? 'Desmarcar todas'
+                      : 'Seleccionar todas'}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={submitting}
                     onClick={() =>
                       sendAction({
                         type: 'SELECT_TARGET',
-                        targetCardId: cand.instanceId,
+                        cardInstanceIds: [],
                       })
                     }
-                    footerAction={
-                      <div className="btn-war-gold text-[10px] text-center py-1 rounded-sm">
-                        Seleccionar
-                      </div>
+                    className="btn-war-iron px-3 py-1.5 rounded text-xs"
+                  >
+                    No descartar ninguna (0)
+                  </button>
+                  <button
+                    type="button"
+                    disabled={submitting}
+                    onClick={() =>
+                      sendAction({
+                        type: 'SELECT_TARGET',
+                        cardInstanceIds: selectedPromptIds,
+                      })
                     }
-                  />
+                    className="btn-war-gold px-4 py-1.5 rounded text-xs flex items-center gap-1.5"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    Confirmar ({selectedPromptIds.length} seleccionada
+                    {selectedPromptIds.length === 1 ? '' : 's'})
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 max-h-[65vh] overflow-y-auto p-2">
+              {(view.pendingPrompt.candidateCards || []).map((cand) => {
+                const isMulti = Boolean(view.pendingPrompt?.multiSelect);
+                const isChosen =
+                  isMulti && selectedPromptIds.includes(cand.instanceId);
+
+                return (
+                  <div key={cand.instanceId} className="flex justify-center">
+                    <CardView
+                      card={cand.definition}
+                      instance={cand}
+                      vitalityMode={view.rules.vitalityMode}
+                      size="md"
+                      isSelected={isChosen}
+                      isTargetable={!isMulti}
+                      onClick={() => {
+                        if (isMulti) {
+                          setSelectedPromptIds((prev) =>
+                            prev.includes(cand.instanceId)
+                              ? prev.filter((id) => id !== cand.instanceId)
+                              : [...prev, cand.instanceId]
+                          );
+                        } else {
+                          sendAction({
+                            type: 'SELECT_TARGET',
+                            targetCardId: cand.instanceId,
+                          });
+                        }
+                      }}
+                      footerAction={
+                        isMulti ? (
+                          <div
+                            className={`font-display text-[10px] font-bold text-center py-1 rounded-sm ${
+                              isChosen
+                                ? 'bg-[#f3d46b] text-[#12100e]'
+                                : 'bg-[#26211d] text-[#a89b8c]'
+                            }`}
+                          >
+                            {isChosen ? '✓ DESCARTAR' : 'CONSERVAR EN MANO'}
+                          </div>
+                        ) : (
+                          <div className="btn-war-gold text-[10px] text-center py-1 rounded-sm">
+                            Seleccionar
+                          </div>
+                        )
+                      }
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {keywordsModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0d0b09]/85 backdrop-blur-sm p-4">
+          <div className="bastion-panel rounded-lg max-w-3xl w-full p-6 space-y-4 border-2 border-[#c59b27] max-h-[88vh] flex flex-col">
+            <div className="flex items-center justify-between border-b border-[#6b5a48] pb-3 shrink-0">
+              <div className="flex items-center gap-2">
+                <BookOpen className="w-5 h-5 text-[#f3d46b]" />
+                <div>
+                  <h3 className="font-display text-base font-bold text-[#f3ead8]">
+                    Glosario de Palabras Clave (Keywords)
+                  </h3>
+                  <p className="font-serif text-xs text-[#d6c7b8]">
+                    En las cartas, las palabras subrayadas con línea punteada dorada son Keywords. Pasá el cursor sobre una carta o palabra para ver su explicación.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setKeywordsModalOpen(false)}
+                className="btn-war-iron px-3 py-1 rounded text-xs flex items-center gap-1"
+              >
+                <X className="w-3.5 h-3.5" /> Cerrar
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 overflow-y-auto pr-1">
+              {GAME_KEYWORDS.map((kw) => (
+                <div
+                  key={kw.id}
+                  className="p-3 rounded bg-[#14110e] border border-[#574c3f] space-y-1"
+                >
+                  <div className="font-display text-xs font-bold text-[#fef08a]">
+                    {kw.badge}
+                  </div>
+                  <p className="font-serif text-xs text-[#d6c7b8] leading-snug">
+                    {kw.description}
+                  </p>
                 </div>
               ))}
             </div>

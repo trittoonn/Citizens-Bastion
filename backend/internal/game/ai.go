@@ -49,6 +49,13 @@ func (g *GameState) RunAITurnIfNeeded(aiPlayerID string, diff AIDifficulty) {
 
 		// 2. Handle AI PendingPrompt (target selection)
 		if g.Phase == PhaseAwaitingInput && g.PendingPrompt != nil && g.PendingPrompt.PlayerID == aiPlayerID {
+			if g.PendingPrompt.MultiSelect {
+				multiIDs := g.chooseAIPromptMultiTargets(aiPlayer, g.Players[1-aiIdx], g.PendingPrompt, diff)
+				if err := g.SubmitPromptTargets(aiPlayerID, "", multiIDs); err != nil {
+					return
+				}
+				continue
+			}
 			targetID := g.chooseAIPromptTarget(aiPlayer, g.Players[1-aiIdx], g.PendingPrompt, diff)
 			if targetID == "" && len(g.PendingPrompt.ValidTargetIDs) > 0 {
 				targetID = g.PendingPrompt.ValidTargetIDs[0]
@@ -650,4 +657,44 @@ func (g *GameState) chooseAIPromptTarget(ai, human *PlayerState, prompt *Pending
 
 	_ = human
 	return prompt.ValidTargetIDs[0]
+}
+
+func (g *GameState) chooseAIPromptMultiTargets(ai, human *PlayerState, prompt *PendingPrompt, diff AIDifficulty) []string {
+	if prompt == nil || len(prompt.ValidTargetIDs) == 0 {
+		return nil
+	}
+
+	var chosen []string
+	for _, id := range prompt.ValidTargetIDs {
+		c := g.findCardAnywhere(id)
+		if c == nil {
+			continue
+		}
+		hasOnDiscard := false
+		for _, ab := range c.Definition.Abilities {
+			if ab.Trigger == TriggerOnDiscard {
+				hasOnDiscard = true
+				break
+			}
+		}
+		if hasOnDiscard || c.Definition.PlayFromDiscard {
+			chosen = append(chosen, c.InstanceID)
+			continue
+		}
+		if c.Definition.Type == CardTypeEvent && len(ai.Discard) == 0 &&
+			(c.Definition.ID == "el_regreso_del_sobreviviente" || c.Definition.ID == "busqueda_del_tesoro") {
+			chosen = append(chosen, c.InstanceID)
+			continue
+		}
+		if c.Definition.Type == CardTypeCitizen && c.Definition.Vitality <= 3 && len(chosen) < 2 {
+			chosen = append(chosen, c.InstanceID)
+		}
+	}
+
+	if len(chosen) == 0 && diff != AIDifficultyEasy && len(prompt.ValidTargetIDs) > 0 {
+		// Cycle at least 1 card if nothing obvious was picked
+		chosen = append(chosen, prompt.ValidTargetIDs[0])
+	}
+	_ = human
+	return chosen
 }

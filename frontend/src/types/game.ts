@@ -192,6 +192,9 @@ export interface PendingPrompt {
   targetOwner: TargetOwner;
   validTargetIds: string[];
   candidateCards?: CardInstance[];
+  multiSelect?: boolean;
+  minTargets?: number;
+  maxTargets?: number;
 }
 
 export interface LogEntry {
@@ -253,6 +256,44 @@ export interface SanitizedPlayerView {
   board: Record<'city' | 'road' | 'combat', CardInstance[]>;
 }
 
+export interface MatchCardStatView {
+  cardId: string;
+  cardName: string;
+  cardType: CardType;
+  ownerId: string;
+  ownerName: string;
+  timesPlayed: number;
+  damageDealt: number;
+  kills: number;
+}
+
+export interface PlayerMatchStatsView {
+  playerId: string;
+  playerName: string;
+  wentFirst: boolean;
+  developmentPoints: number;
+  citizensAtEnd: number;
+  cardsPlayed: number;
+  damageDealt: number;
+  enemyUnitsKilled: number;
+  cardsInHand: number;
+  cardsInDeck: number;
+  cardsInDiscard: number;
+  cardsInExile: number;
+  cardBreakdown: MatchCardStatView[];
+}
+
+export interface MatchStatsView {
+  totalTurns: number;
+  firstPlayerId: string;
+  firstPlayerName: string;
+  you: PlayerMatchStatsView;
+  opponent: PlayerMatchStatsView;
+  topDamageCard?: MatchCardStatView;
+  mostPlayedCard?: MatchCardStatView;
+  mostLethalCard?: MatchCardStatView;
+}
+
 export interface PlayerGameView {
   gameId: string;
   gameName: string;
@@ -274,6 +315,7 @@ export interface PlayerGameView {
   winReason?: string;
   log: LogEntry[];
   recentSteps?: ActionStepSnapshot[];
+  matchStats?: MatchStatsView;
 }
 
 export interface LobbySummary {
