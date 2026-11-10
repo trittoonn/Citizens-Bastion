@@ -99,6 +99,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/config", s.handleConfig)
 	s.mux.HandleFunc("/config.js", s.handleConfigJS)
 	s.mux.HandleFunc("/api/cards/defaults", s.handleDefaults)
+	s.mux.HandleFunc("/api/simulations/ai-vs-ai", s.handleAIVsAISimulation)
 	s.mux.HandleFunc("/api/lobbies", s.handleLobbies)
 	s.mux.HandleFunc("/api/lobbies/", s.handleLobbyByID)
 	s.mux.HandleFunc("/", s.handleStaticOrSPA)
@@ -180,6 +181,26 @@ func (s *Server) handleDefaults(w http.ResponseWriter, r *http.Request) {
 		"cards":        game.DefaultCards(),
 		"decks":        game.DefaultDecks(),
 		"defaultRules": game.DefaultRulesConfig(),
+	})
+}
+
+func (s *Server) handleAIVsAISimulation(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "método no permitido")
+		return
+	}
+	var req game.SimulationRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "JSON inválido: "+err.Error())
+		return
+	}
+	report, err := game.RunAIVsAISimulation(req)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"report": report,
 	})
 }
 

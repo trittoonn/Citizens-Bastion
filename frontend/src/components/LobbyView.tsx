@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
+  BarChart3,
   Bot,
   Play,
   PlusCircle,
@@ -26,6 +27,7 @@ import {
   savePlayerSession,
 } from '../services/storage';
 import { createLobby, fetchLobbies, joinLobby } from '../services/api';
+import { AiVsAiSimulatorModal } from './AiVsAiSimulatorModal';
 
 interface LobbyViewProps {
   onEnterGame: (lobbyId: string, initialView: PlayerGameView) => void;
@@ -80,10 +82,11 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
   const [aiDifficulty, setAiDifficulty] = useState<Exclude<AIDifficulty, ''>>('medium');
   const [startingPlayer, setStartingPlayer] = useState<StartingPlayerMode>('player');
   const [vitalityMode, setVitalityMode] = useState<VitalityMode>('dynamic');
-  const [retaliationDamage, setRetaliationDamage] = useState<boolean>(false);
-  const [pointsToWin, setPointsToWin] = useState(10);
+  const [retaliationDamage, setRetaliationDamage] = useState<boolean>(true);
+  const [pointsToWin, setPointsToWin] = useState(5);
   const [enforceDeckConstraints, setEnforceDeckConstraints] = useState(false);
   const [showAdvancedRules, setShowAdvancedRules] = useState(false);
+  const [showSimulatorModal, setShowSimulatorModal] = useState(false);
 
   const [lobbies, setLobbies] = useState<LobbySummary[]>([]);
   const [loading, setLoading] = useState(false);
@@ -232,13 +235,21 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
           </select>
         </div>
 
-        <div>
+        <div className="flex flex-col sm:flex-row gap-2">
           <button
             type="button"
             onClick={onNavigateDeckBuilder}
-            className="btn-war-iron w-full py-2.5 px-4 rounded text-xs"
+            className="btn-war-iron flex-1 py-2.5 px-3 rounded text-xs"
           >
-            Forjar Cartas y Editar Mazos →
+            Forjar Cartas y Mazos →
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowSimulatorModal(true)}
+            className="btn-war-gold py-2.5 px-3.5 rounded text-xs flex items-center justify-center gap-1.5"
+          >
+            <BarChart3 className="w-4 h-4" />
+            Simulador IA vs IA
           </button>
         </div>
       </div>
@@ -269,11 +280,11 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
               <label className="block font-display text-xs font-bold text-[#d6c7b8]">
                 Tipo de Oponente
               </label>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-3 gap-2">
                 <button
                   type="button"
                   onClick={() => setVsAi(false)}
-                  className={`py-2.5 px-3 rounded border font-display text-xs font-bold flex items-center justify-center gap-1.5 transition ${
+                  className={`py-2.5 px-2 rounded border font-display text-xs font-bold flex items-center justify-center gap-1.5 transition ${
                     !vsAi
                       ? 'bg-[#2b2216] border-[#c59b27] text-[#e3c158] shadow-[inset_0_0_12px_rgba(197,155,39,0.25)]'
                       : 'bg-[#14110e] border-[#463c32] text-[#a89b8c] hover:border-[#6e5d4f]'
@@ -290,7 +301,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                       setGameName('Asedio de Entrenamiento');
                     }
                   }}
-                  className={`py-2.5 px-3 rounded border font-display text-xs font-bold flex items-center justify-center gap-1.5 transition ${
+                  className={`py-2.5 px-2 rounded border font-display text-xs font-bold flex items-center justify-center gap-1.5 transition ${
                     vsAi
                       ? 'bg-[#2b2216] border-[#c59b27] text-[#e3c158] shadow-[inset_0_0_12px_rgba(197,155,39,0.25)]'
                       : 'bg-[#14110e] border-[#463c32] text-[#a89b8c] hover:border-[#6e5d4f]'
@@ -298,6 +309,14 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                 >
                   <Bot className="w-4 h-4" />
                   Contra la IA
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowSimulatorModal(true)}
+                  className="py-2.5 px-2 rounded border border-[#c59b27]/70 bg-[#1c1610] hover:bg-[#2b2216] text-[#fef08a] font-display text-xs font-bold flex items-center justify-center gap-1.5 transition"
+                >
+                  <BarChart3 className="w-4 h-4 text-[#f3d46b]" />
+                  IA vs IA
                 </button>
               </div>
             </div>
@@ -703,6 +722,13 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
           </div>
         </div>
       </div>
+
+      {showSimulatorModal && (
+        <AiVsAiSimulatorModal
+          decks={decks}
+          onClose={() => setShowSimulatorModal(false)}
+        />
+      )}
     </div>
   );
 };

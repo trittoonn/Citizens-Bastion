@@ -27,12 +27,13 @@ type LobbySummary struct {
 type ActionType string
 
 const (
-	ActionMulligan     ActionType = "MULLIGAN"
-	ActionPlayCard     ActionType = "PLAY_CARD"
-	ActionMoveCitizen  ActionType = "MOVE_CITIZEN"
-	ActionAttack       ActionType = "ATTACK"
-	ActionSelectTarget ActionType = "SELECT_TARGET"
-	ActionEndTurn      ActionType = "END_TURN"
+	ActionMulligan        ActionType = "MULLIGAN"
+	ActionPlayCard        ActionType = "PLAY_CARD"
+	ActionMoveCitizen     ActionType = "MOVE_CITIZEN"
+	ActionAttack          ActionType = "ATTACK"
+	ActionActivateAbility ActionType = "ACTIVATE_ABILITY"
+	ActionSelectTarget    ActionType = "SELECT_TARGET"
+	ActionEndTurn         ActionType = "END_TURN"
 )
 
 // ActionRequest represents an action submitted by a player to a lobby.
@@ -202,6 +203,8 @@ func (m *Manager) SubmitAction(lobbyID string, req ActionRequest) (*game.PlayerG
 		actionErr = entry.state.MoveCitizen(req.PlayerID, req.CardInstanceID, req.TargetZone)
 	case ActionAttack:
 		actionErr = entry.state.AttackCitizen(req.PlayerID, req.AttackerID, req.DefenderID)
+	case ActionActivateAbility:
+		actionErr = entry.state.ActivateCardAbility(req.PlayerID, req.CardInstanceID)
 	case ActionSelectTarget:
 		actionErr = entry.state.SubmitPromptTarget(req.PlayerID, req.TargetCardID)
 	case ActionEndTurn:

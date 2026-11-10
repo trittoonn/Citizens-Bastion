@@ -38,32 +38,38 @@ type DeckConstraints struct {
 
 // GameRulesConfig holds configurable match parameters.
 type GameRulesConfig struct {
-	VitalityMode      VitalityMode       `json:"vitalityMode"`
-	RetaliationDamage bool               `json:"retaliationDamage"`
-	StartingPlayer    StartingPlayerMode `json:"startingPlayer"`
-	PointsToWin       int                `json:"pointsToWin"`
-	InitialHandSize   int             `json:"initialHandSize"`
-	DrawPerTurn       int             `json:"drawPerTurn"`
-	FirstTurnDraw     int             `json:"firstTurnDraw"`
-	MaxPlaysPerTurn   int             `json:"maxPlaysPerTurn"`
-	FirstTurnMaxPlays int             `json:"firstTurnMaxPlays"`
-	MaxMovesPerTurn   int             `json:"maxMovesPerTurn"`
-	DeckConstraints   DeckConstraints `json:"deckConstraints"`
+	VitalityMode        VitalityMode       `json:"vitalityMode"`
+	RetaliationDamage   bool               `json:"retaliationDamage"`
+	StartingPlayer      StartingPlayerMode `json:"startingPlayer"`
+	PointsToWin         int                `json:"pointsToWin"`
+	PointsEveryTwoTurns bool               `json:"pointsEveryTwoTurns"`
+	MaxUnitsPerZone     int                `json:"maxUnitsPerZone"`
+	MaxHandSize         int                `json:"maxHandSize"`
+	InitialHandSize     int                `json:"initialHandSize"`
+	DrawPerTurn         int                `json:"drawPerTurn"`
+	FirstTurnDraw       int                `json:"firstTurnDraw"`
+	MaxPlaysPerTurn     int                `json:"maxPlaysPerTurn"`
+	FirstTurnMaxPlays   int                `json:"firstTurnMaxPlays"`
+	MaxMovesPerTurn     int                `json:"maxMovesPerTurn"`
+	DeckConstraints     DeckConstraints    `json:"deckConstraints"`
 }
 
 // DefaultRulesConfig returns the standard rules from Reglas 2026 v1.md.
 func DefaultRulesConfig() GameRulesConfig {
 	return GameRulesConfig{
-		VitalityMode:      VitalityModeDynamic,
-		RetaliationDamage: false,
-		StartingPlayer:    StartingPlayerHost,
-		PointsToWin:       10,
-		InitialHandSize:   4,
-		DrawPerTurn:       2,
-		FirstTurnDraw:     1,
-		MaxPlaysPerTurn:   3,
-		FirstTurnMaxPlays: 2,
-		MaxMovesPerTurn:   1,
+		VitalityMode:        VitalityModeDynamic,
+		RetaliationDamage:   true,
+		StartingPlayer:      StartingPlayerHost,
+		PointsToWin:         5,
+		PointsEveryTwoTurns: true,
+		MaxUnitsPerZone:     5,
+		MaxHandSize:         10,
+		InitialHandSize:     4,
+		DrawPerTurn:         2,
+		FirstTurnDraw:       2,
+		MaxPlaysPerTurn:     3,
+		FirstTurnMaxPlays:   3,
+		MaxMovesPerTurn:     5,
 		DeckConstraints: DeckConstraints{
 			Enforced:         false,
 			MinCards:         15,
@@ -86,6 +92,12 @@ func (c GameRulesConfig) Normalize() GameRulesConfig {
 	}
 	if c.PointsToWin <= 0 {
 		c.PointsToWin = def.PointsToWin
+	}
+	if c.MaxUnitsPerZone <= 0 {
+		c.MaxUnitsPerZone = def.MaxUnitsPerZone
+	}
+	if c.MaxHandSize <= 0 {
+		c.MaxHandSize = def.MaxHandSize
 	}
 	if c.InitialHandSize <= 0 {
 		c.InitialHandSize = def.InitialHandSize
@@ -145,8 +157,12 @@ func ValidateDeck(cards []CardDefinition, constraints DeckConstraints) error {
 				key = card.Name
 			}
 			counts[key]++
-			if counts[key] > constraints.MaxCopiesPerCard {
-				return fmt.Errorf("la carta '%s' supera el límite de %d copias (%d)", card.Name, constraints.MaxCopiesPerCard, counts[key])
+			maxAllowed := constraints.MaxCopiesPerCard
+			if card.IsCommander {
+				maxAllowed = 1
+			}
+			if counts[key] > maxAllowed {
+				return fmt.Errorf("la carta '%s' supera el límite de %d copias (%d)", card.Name, maxAllowed, counts[key])
 			}
 		}
 	}

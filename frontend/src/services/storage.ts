@@ -390,6 +390,12 @@ function describeStep(step: EffectStep): string {
       }
       return `Otorga ${sign} a un ciudadano ${ownerLabel}.`;
     }
+    case 'exile_and_summon_by_v': {
+      return `Triturá hasta ${step.amount || 3} ciudadanos de tu descarte y convoca un Ciudadano con V igual a la suma.`;
+    }
+    case 'cycle_hand': {
+      return 'Descarta toda tu mano y levanta esa misma cantidad de cartas.';
+    }
     default:
       return '';
   }
@@ -397,14 +403,38 @@ function describeStep(step: EffectStep): string {
 
 export function generateCardDescription(
   abilities: Ability[],
-  keywords?: { isSpy?: boolean; hasShield?: boolean; playFromDiscard?: boolean }
+  keywords?: {
+    isSpy?: boolean;
+    hasShield?: boolean;
+    isDefender?: boolean;
+    hasQuickAttack?: boolean;
+    hasReach?: boolean;
+    isCommander?: boolean;
+    isLocation?: boolean;
+    playFromDiscard?: boolean;
+  }
 ): string {
   const parts: string[] = [];
+  if (keywords?.isCommander) {
+    parts.push('Comandante.');
+  }
+  if (keywords?.isLocation) {
+    parts.push('Locación.');
+  }
   if (keywords?.isSpy) {
     parts.push('Espía (se juega del lado del oponente).');
   }
   if (keywords?.hasShield) {
     parts.push('Escudo (evita el primer daño que fuera a recibir y luego pierde el escudo).');
+  }
+  if (keywords?.isDefender) {
+    parts.push('Defensor.');
+  }
+  if (keywords?.hasQuickAttack) {
+    parts.push('Ataque Rápido.');
+  }
+  if (keywords?.hasReach) {
+    parts.push('Rango.');
   }
   if (abilities && abilities.length > 0) {
     for (const ab of abilities) {
@@ -421,6 +451,10 @@ export function generateCardDescription(
           ? 'Cuando juegues un Evento: '
           : ab.trigger === 'on_discard'
           ? 'Cuando descartas esta carta: '
+          : ab.trigger === 'on_any_discard'
+          ? 'Cuando descartes una carta: '
+          : ab.trigger === 'activated_wear'
+          ? `Desgaste ${ab.wearCost || 2}: `
           : '';
       const stepTexts = ab.steps.map(describeStep).filter(Boolean).join(' ');
       if (stepTexts) {
@@ -517,6 +551,11 @@ function sanitizeImportedCard(raw: any): CardDefinition | null {
 
   const isSpy = raw.isSpy === true;
   const hasShield = raw.hasShield === true;
+  const isDefender = raw.isDefender === true;
+  const hasQuickAttack = raw.hasQuickAttack === true;
+  const hasReach = raw.hasReach === true;
+  const isCommander = raw.isCommander === true;
+  const isLocation = raw.isLocation === true;
   const playFromDiscard = raw.playFromDiscard === true;
 
   const description =
@@ -525,6 +564,11 @@ function sanitizeImportedCard(raw: any): CardDefinition | null {
       : generateCardDescription(abilities || [], {
           isSpy,
           hasShield,
+          isDefender,
+          hasQuickAttack,
+          hasReach,
+          isCommander,
+          isLocation,
           playFromDiscard,
         });
 
@@ -539,7 +583,13 @@ function sanitizeImportedCard(raw: any): CardDefinition | null {
     ...(abilities && abilities.length > 0 ? { abilities } : {}),
     ...(isSpy ? { isSpy: true } : {}),
     ...(hasShield ? { hasShield: true } : {}),
+    ...(isDefender ? { isDefender: true } : {}),
+    ...(hasQuickAttack ? { hasQuickAttack: true } : {}),
+    ...(hasReach ? { hasReach: true } : {}),
+    ...(isCommander ? { isCommander: true } : {}),
+    ...(isLocation ? { isLocation: true } : {}),
     ...(playFromDiscard ? { playFromDiscard: true } : {}),
+    ...(raw.planet ? { planet: String(raw.planet) } : {}),
     ...(raw.artColor ? { artColor: String(raw.artColor) } : {}),
     ...(raw.artIcon ? { artIcon: String(raw.artIcon) } : {}),
     ...(raw.artImage ? { artImage: String(raw.artImage) } : {}),

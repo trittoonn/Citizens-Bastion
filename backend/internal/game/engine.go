@@ -8,6 +8,11 @@ import (
 
 // NewGameState creates a new authoritative GameState waiting for players.
 func NewGameState(id, gameName string, rules GameRulesConfig) *GameState {
+	return NewGameStateWithSeed(id, gameName, rules, time.Now().UnixNano())
+}
+
+// NewGameStateWithSeed creates a new GameState with an explicit random seed (ideal for parallel simulations).
+func NewGameStateWithSeed(id, gameName string, rules GameRulesConfig, seed int64) *GameState {
 	return &GameState{
 		ID:           id,
 		GameName:     gameName,
@@ -16,6 +21,65 @@ func NewGameState(id, gameName string, rules GameRulesConfig) *GameState {
 		ResumePhase:  PhaseWaitingForPlayers,
 		Log:          []LogEntry{},
 		StateVersion: 1,
+		rng:          rand.New(rand.NewSource(seed)),
+	}
+}
+
+func (g *GameState) randIntn(n int) int {
+	if n <= 0 {
+		return 0
+	}
+	if g.rng == nil {
+		g.rng = rand.New(rand.NewSource(time.Now().UnixNano() + int64(g.nextInstanceSeq)))
+	}
+	return g.rng.Intn(n)
+}
+
+func (g *GameState) maxUnitsPerZone() int {
+	if g.Rules.MaxUnitsPerZone > 0 {
+		return g.Rules.MaxUnitsPerZone
+	}
+	return 5
+}
+
+func (g *GameState) maxHandSize() int {
+	if g.Rules.MaxHandSize > 0 {
+		return g.Rules.MaxHandSize
+	}
+	return 10
+}
+
+func (g *GameState) recordTelemetryPlay(playerIdx int, def CardDefinition) {
+	if g.Telemetry == nil || def.ID == "" {
+		return
+	}
+	if playerIdx >= 0 && playerIdx < 2 {
+		g.Telemetry.CardsPlayedBySlot[playerIdx]++
+	}
+	g.Telemetry.PlaysByCard[def.ID]++
+	g.Telemetry.CardNames[def.ID] = def.Name
+	g.Telemetry.CardTypes[def.ID] = def.Type
+	g.Telemetry.PlayedInMatch[def.ID] = true
+}
+
+func (g *GameState) recordTelemetryDamage(playerIdx int, cardDefID, cardName string, cardType CardType, dmg int, killed bool) {
+	if g.Telemetry == nil || dmg <= 0 {
+		return
+	}
+	if playerIdx >= 0 && playerIdx < 2 {
+		g.Telemetry.TotalDamageBySlot[playerIdx] += dmg
+	}
+	if cardDefID != "" {
+		g.Telemetry.DamageByCard[cardDefID] += dmg
+		if cardName != "" {
+			g.Telemetry.CardNames[cardDefID] = cardName
+		}
+		if cardType != "" {
+			g.Telemetry.CardTypes[cardDefID] = cardType
+		}
+		if killed {
+			g.Telemetry.KillsByCard[cardDefID]++
+		}
 	}
 }
 
@@ -78,6 +142,9 @@ func sanitizePlayerState(p *PlayerState, includeHand bool) SanitizedPlayerView {
 }
 
 func (g *GameState) recordAnimStep(ev ActionAnimationEvent) {
+	if g.DisableAnimSteps {
+		return
+	}
 	g.nextAnimSeq++
 	ev.Seq = g.nextAnimSeq
 
@@ -154,6 +221,10 @@ func (g *GameState) AddPlayer(playerID, playerName string, deckDefs []CardDefini
 			Zone:            ZoneDeck,
 		}
 		ps.Deck = append(ps.Deck, inst)
+		if g.Telemetry != nil && def.ID != "" {
+			g.Telemetry.CardNames[def.ID] = def.Name
+			g.Telemetry.CardTypes[def.ID] = def.Type
+		}
 	}
 
 	g.Players[slot] = ps
@@ -178,16 +249,23 @@ func (g *GameState) startMatchMulligan() {
 }
 
 func (g *GameState) shuffleDeck(p *PlayerState) {
-	r := rand.New(rand.NewSource(time.Now().UnixNano() + int64(g.nextInstanceSeq)))
-	r.Shuffle(len(p.Deck), func(i, j int) {
+	if g.rng == nil {
+		g.rng = rand.New(rand.NewSource(time.Now().UnixNano() + int64(g.nextInstanceSeq)))
+	}
+	g.rng.Shuffle(len(p.Deck), func(i, j int) {
 		p.Deck[i], p.Deck[j] = p.Deck[j], p.Deck[i]
 	})
 }
 
 func (g *GameState) drawCards(p *PlayerState, count int) int {
 	drawn := 0
+	maxHand := g.maxHandSize()
 	for i := 0; i < count; i++ {
 		if len(p.Deck) == 0 {
+			break
+		}
+		if len(p.Hand) >= maxHand {
+			g.addLog(fmt.Sprintf("%s ya tiene el máximo de %d cartas en la mano.", p.Name, maxHand))
 			break
 		}
 		top := p.Deck[0]
@@ -258,6 +336,18 @@ func (g *GameState) ApplyMulligan(playerID string, cardInstanceIDs []string) err
 		g.addLog(fmt.Sprintf("%s conservó su mano inicial.", p.Name))
 	}
 
+	// Move any Commander (Líder) card from Deck into Hand (Zona de Líder: visible extension of hand)
+	var remainingDeck []*CardInstance
+	for _, dc := range p.Deck {
+		if dc.Definition.IsCommander && len(p.Hand) < g.maxHandSize() {
+			dc.Zone = ZoneHand
+			p.Hand = append([]*CardInstance{dc}, p.Hand...)
+		} else {
+			remainingDeck = append(remainingDeck, dc)
+		}
+	}
+	p.Deck = remainingDeck
+
 	p.MulliganDone = true
 
 	if g.Players[0].MulliganDone && g.Players[1].MulliganDone {
@@ -266,10 +356,12 @@ func (g *GameState) ApplyMulligan(playerID string, cardInstanceIDs []string) err
 		case StartingPlayerGuest:
 			firstIdx = 1
 		case StartingPlayerRandom:
-			r := rand.New(rand.NewSource(time.Now().UnixNano() + int64(g.nextInstanceSeq)))
-			firstIdx = r.Intn(2)
+			firstIdx = g.randIntn(2)
 		default:
 			firstIdx = 0
+		}
+		if g.Telemetry != nil {
+			g.Telemetry.FirstPlayerIdx = firstIdx
 		}
 		g.beginTurn(firstIdx)
 	}
@@ -284,14 +376,17 @@ func (g *GameState) beginTurn(playerIdx int) {
 	g.ActivePlayerIdx = playerIdx
 	active := g.Players[playerIdx]
 
+	active.AlliedDeathsThisTurn = 0
+	active.CardsLeftDiscardThisTurn = 0
+
 	// Reset per-turn card flags across board
-	movableCount := 0
 	for _, z := range []ZoneID{ZoneCity, ZoneRoad, ZoneCombat} {
 		for _, c := range active.Board[z] {
 			c.PlayedThisTurn = false
 			c.MovedThisTurn = false
 			c.AttackedThisTurn = false
-			movableCount++
+			c.UsedAbilityThisTurn = false
+			c.SacrificeAtTurnEnd = false
 		}
 	}
 
@@ -300,7 +395,7 @@ func (g *GameState) beginTurn(playerIdx int) {
 	} else {
 		g.PlaysRemaining = g.Rules.MaxPlaysPerTurn
 	}
-	g.MovesRemaining = movableCount
+	g.MovesRemaining = g.countMovableCitizens(active)
 
 	g.Phase = PhaseStartOfTurn
 	g.ResumePhase = PhaseMain
@@ -331,28 +426,117 @@ func (g *GameState) beginTurn(playerIdx int) {
 func (g *GameState) queueBoardTriggers(controller *PlayerState, trigger TriggerType) {
 	orderedZones := []ZoneID{ZoneCombat, ZoneRoad, ZoneCity}
 	for _, z := range orderedZones {
-		row := controller.Board[z]
+		row := append([]*CardInstance{}, controller.Board[z]...)
 		for i := len(row) - 1; i >= 0; i-- {
 			card := row[i]
 			for _, ab := range card.Definition.Abilities {
-				if ab.Trigger == trigger {
-					for _, step := range ab.Steps {
-						g.EffectQueue = append(g.EffectQueue, QueuedEffect{
-							ControllerID:   controller.ID,
-							SourceCardID:   card.InstanceID,
-							SourceCardName: card.Definition.Name,
-							SourceZone:     z,
-							Step:           step,
-						})
-					}
+				if ab.Trigger != trigger {
+					continue
 				}
+				if ab.ConditionAlliedDiedThisTurn && controller.AlliedDeathsThisTurn <= 0 {
+					continue
+				}
+				if ab.ConditionCardLeftDiscardThisTurn && controller.CardsLeftDiscardThisTurn <= 0 {
+					continue
+				}
+				g.enqueueAbilityFromBoardCard(controller, card, z, ab)
 			}
 		}
 	}
 }
 
+func (g *GameState) enqueueAbilityFromBoardCard(controller *PlayerState, card *CardInstance, zone ZoneID, ab Ability) {
+	destroySourceAfter := false
+	if ab.WearCost > 0 {
+		card.CurrentVitality -= ab.WearCost
+		g.addLog(fmt.Sprintf("⚙️ Desgaste %d: %s (%s) pierde %d de Vitalidad/Armadura (queda en %d).", ab.WearCost, card.Definition.Name, controller.Name, ab.WearCost, card.CurrentVitality))
+		if card.CurrentVitality <= 0 {
+			destroySourceAfter = true
+		}
+	}
+
+	if len(ab.Steps) == 0 {
+		if destroySourceAfter {
+			g.destroyBoardCard(controller, card.InstanceID)
+		}
+		return
+	}
+
+	for stepIdx, step := range ab.Steps {
+		isLast := stepIdx == len(ab.Steps)-1
+		g.EffectQueue = append(g.EffectQueue, QueuedEffect{
+			ControllerID:      controller.ID,
+			SourceCardID:      card.InstanceID,
+			SourceCardDefID:   card.Definition.ID,
+			SourceCardName:    card.Definition.Name,
+			SourceZone:        zone,
+			Step:              step,
+			DestroySourceCard: isLast && destroySourceAfter,
+		})
+	}
+}
+
+// ActivateCardAbility activates a board card's TriggerActivatedWear ability (such as Cremadora Sospechosa).
+func (g *GameState) ActivateCardAbility(playerID, cardInstanceID string) error {
+	if g.Phase != PhaseMain {
+		return fmt.Errorf("solo podés activar habilidades en la Fase Principal")
+	}
+	p, idx, err := g.GetPlayer(playerID)
+	if err != nil {
+		return err
+	}
+	if idx != g.ActivePlayerIdx {
+		return fmt.Errorf("no es tu turno")
+	}
+
+	card, zone, _ := g.findBoardCard(p, cardInstanceID)
+	if card == nil {
+		return fmt.Errorf("la carta no se encuentra en tu tablero")
+	}
+
+	var foundAb *Ability
+	for i := range card.Definition.Abilities {
+		if card.Definition.Abilities[i].Trigger == TriggerActivatedWear {
+			foundAb = &card.Definition.Abilities[i]
+			break
+		}
+	}
+	if foundAb == nil {
+		return fmt.Errorf("%s no tiene una habilidad activable de Desgaste", card.Definition.Name)
+	}
+	if foundAb.OncePerTurn && card.UsedAbilityThisTurn {
+		return fmt.Errorf("%s ya activó su habilidad en este turno", card.Definition.Name)
+	}
+
+	// Verify valid targets before paying WearCost
+	for _, step := range foundAb.Steps {
+		if step.Op == EffectExileAndSummonByV {
+			hasCitizenInDiscard := false
+			for _, dc := range p.Discard {
+				if dc.Definition.Type == CardTypeCitizen {
+					hasCitizenInDiscard = true
+					break
+				}
+			}
+			if !hasCitizenInDiscard {
+				return fmt.Errorf("no hay Ciudadanos en tu Descarte para triturar con %s", card.Definition.Name)
+			}
+		} else if step.Target.Requirement == TargetReqSingleCard {
+			if len(g.findCandidateTargets(p.ID, card.InstanceID, step.Target)) == 0 {
+				return fmt.Errorf("no hay objetivos válidos para activar %s", card.Definition.Name)
+			}
+		}
+	}
+
+	card.UsedAbilityThisTurn = true
+	g.enqueueAbilityFromBoardCard(p, card, zone, *foundAb)
+	g.processEffectQueue(PhaseMain)
+	g.bumpVersion()
+	return nil
+}
+
 // CanPlayInCombat returns true if the active player is allowed to play a Citizen directly into ZoneCombat.
-// Rule 15: "Sólo pueden jugar una carta en la Zona de Combate si su oponente tiene una carta ahí."
+// Rule 18: "Sólo pueden jugar una carta en la Zona de Combate si su oponente tiene una carta ahí."
 func (g *GameState) CanPlayInCombat(playerID string) bool {
 	_, idx, err := g.GetPlayer(playerID)
 	if err != nil {
@@ -365,7 +549,7 @@ func (g *GameState) CanPlayInCombat(playerID string) bool {
 	return len(opp.Board[ZoneCombat]) > 0
 }
 
-// PlayCard plays a card from the active player's hand (or another zone if specified).
+// PlayCard plays a card from the active player's hand (or discard if PlayFromDiscard).
 func (g *GameState) PlayCard(playerID, cardInstanceID string, targetZone ZoneID) error {
 	if g.Phase != PhaseMain {
 		return fmt.Errorf("solo podés jugar cartas en la Fase Principal")
@@ -414,17 +598,22 @@ func (g *GameState) PlayCard(playerID, cardInstanceID string, targetZone ZoneID)
 			return fmt.Errorf("solo podés jugar una unidad en la Zona de Combate si el oponente tiene al menos una carta ahí")
 		}
 
+		opp := g.Players[1-idx]
+		boardOwner := p
+		if card.Definition.IsSpy && opp != nil {
+			boardOwner = opp
+		}
+
+		if len(boardOwner.Board[targetZone]) >= g.maxUnitsPerZone() {
+			return fmt.Errorf("la zona %s ya alcanzó el límite máximo de %d unidades", zoneDisplayName(targetZone), g.maxUnitsPerZone())
+		}
+
 		// Remove from Hand or Discard
 		if fromZone == ZoneHand {
 			p.Hand = append(p.Hand[:handIdx], p.Hand[handIdx+1:]...)
 		} else {
 			p.Discard = append(p.Discard[:discardIdx], p.Discard[discardIdx+1:]...)
-		}
-
-		opp := g.Players[1-idx]
-		boardOwner := p
-		if card.Definition.IsSpy && opp != nil {
-			boardOwner = opp
+			p.CardsLeftDiscardThisTurn++
 		}
 
 		card.OwnerID = boardOwner.ID
@@ -434,6 +623,8 @@ func (g *GameState) PlayCard(playerID, cardInstanceID string, targetZone ZoneID)
 		card.PlayedThisTurn = true
 		card.MovedThisTurn = false
 		card.AttackedThisTurn = false
+		card.UsedAbilityThisTurn = false
+		card.SacrificeAtTurnEnd = false
 		card.ShieldActive = card.Definition.HasShield
 
 		placeAtStart := card.Definition.IsSpy
@@ -455,6 +646,7 @@ func (g *GameState) PlayCard(playerID, cardInstanceID string, targetZone ZoneID)
 		}
 		g.PlaysRemaining--
 		g.MovesRemaining = g.countMovableCitizens(p)
+		g.recordTelemetryPlay(idx, card.Definition)
 
 		statSuffix := "V"
 		if card.Definition.Type == CardTypeTool {
@@ -486,15 +678,7 @@ func (g *GameState) PlayCard(playerID, cardInstanceID string, targetZone ZoneID)
 		// Queue "Al jugar" abilities (not triggered when summoned by an effect)
 		for _, ab := range card.Definition.Abilities {
 			if ab.Trigger == TriggerOnPlay {
-				for _, step := range ab.Steps {
-					g.EffectQueue = append(g.EffectQueue, QueuedEffect{
-						ControllerID:   p.ID,
-						SourceCardID:   card.InstanceID,
-						SourceCardName: card.Definition.Name,
-						SourceZone:     targetZone,
-						Step:           step,
-					})
-				}
+				g.enqueueAbilityFromBoardCard(p, card, targetZone, ab)
 			}
 		}
 
@@ -508,8 +692,7 @@ func (g *GameState) PlayCard(playerID, cardInstanceID string, targetZone ZoneID)
 		if ab.Trigger == TriggerImmediate || ab.Trigger == TriggerOnPlay {
 			for stepIdx, step := range ab.Steps {
 				if step.Target.Requirement == TargetReqSingleCard {
-					// If an earlier step draws or moves cards to hand and this step discards from hand, do not block
-					if stepIdx > 0 && step.Op == EffectDiscard {
+					if stepIdx > 0 && (step.Op == EffectDiscard || step.UseStoredVitality || step.Target.MatchStoredCardType) {
 						continue
 					}
 					candidates := g.findCandidateTargets(p.ID, card.InstanceID, step.Target)
@@ -526,10 +709,12 @@ func (g *GameState) PlayCard(playerID, cardInstanceID string, targetZone ZoneID)
 		p.Hand = append(p.Hand[:handIdx], p.Hand[handIdx+1:]...)
 	} else {
 		p.Discard = append(p.Discard[:discardIdx], p.Discard[discardIdx+1:]...)
+		p.CardsLeftDiscardThisTurn++
 	}
 	card.Zone = ZoneDiscard
 	p.Discard = append(p.Discard, card)
 	g.PlaysRemaining--
+	g.recordTelemetryPlay(idx, card.Definition)
 
 	g.addLog(fmt.Sprintf("%s jugó el evento %s.", p.Name, card.Definition.Name))
 
@@ -546,15 +731,21 @@ func (g *GameState) PlayCard(playerID, cardInstanceID string, targetZone ZoneID)
 		BannerText:     fmt.Sprintf("✨ %s activa el efecto: %s", p.Name, card.Definition.Name),
 	})
 
+	eventSourceZone := ZoneDiscard
+	if IsBoardZone(targetZone) {
+		eventSourceZone = targetZone
+	}
+
 	for _, ab := range card.Definition.Abilities {
 		if ab.Trigger == TriggerImmediate || ab.Trigger == TriggerOnPlay {
 			for _, step := range ab.Steps {
 				g.EffectQueue = append(g.EffectQueue, QueuedEffect{
-					ControllerID:   p.ID,
-					SourceCardID:   card.InstanceID,
-					SourceCardName: card.Definition.Name,
-					SourceZone:     ZoneDiscard,
-					Step:           step,
+					ControllerID:    p.ID,
+					SourceCardID:    card.InstanceID,
+					SourceCardDefID: card.Definition.ID,
+					SourceCardName:  card.Definition.Name,
+					SourceZone:      eventSourceZone,
+					Step:            step,
 				})
 			}
 		}
@@ -569,6 +760,7 @@ func (g *GameState) PlayCard(playerID, cardInstanceID string, targetZone ZoneID)
 }
 
 // countMovableCitizens returns how many Citizens on p's board can still move this turn.
+// Rule 32: "Cada Ciudadano puede atacar o moverse en un turno, pero no las dos."
 func (g *GameState) countMovableCitizens(p *PlayerState) int {
 	if p == nil {
 		return 0
@@ -576,7 +768,7 @@ func (g *GameState) countMovableCitizens(p *PlayerState) int {
 	count := 0
 	for _, z := range []ZoneID{ZoneCity, ZoneRoad, ZoneCombat} {
 		for _, c := range p.Board[z] {
-			if c.Definition.Type == CardTypeCitizen && !c.PlayedThisTurn && !c.MovedThisTurn {
+			if c.Definition.Type == CardTypeCitizen && !c.PlayedThisTurn && !c.MovedThisTurn && !c.AttackedThisTurn {
 				count++
 			}
 		}
@@ -584,8 +776,8 @@ func (g *GameState) countMovableCitizens(p *PlayerState) int {
 	return count
 }
 
-// MoveCitizen moves a Citizen that was not played this turn (and has not moved yet this turn)
-// to an immediately adjacent zone. Any number of eligible Citizens may move per turn.
+// MoveCitizen moves a Citizen that was not played this turn (and has neither moved nor attacked this turn)
+// to an immediately adjacent zone.
 func (g *GameState) MoveCitizen(playerID, cardInstanceID string, toZone ZoneID) error {
 	if g.Phase != PhaseMain {
 		return fmt.Errorf("solo podés mover Ciudadanos en la Fase Principal")
@@ -614,8 +806,14 @@ func (g *GameState) MoveCitizen(playerID, cardInstanceID string, toZone ZoneID) 
 	if card.MovedThisTurn {
 		return fmt.Errorf("%s ya se movió en este turno", card.Definition.Name)
 	}
+	if card.AttackedThisTurn {
+		return fmt.Errorf("%s no puede moverse porque ya atacó en este turno", card.Definition.Name)
+	}
 	if !AreZonesAdjacent(fromZone, toZone) {
 		return fmt.Errorf("solo podés mover un Ciudadano a una zona inmediatamente adyacente (%s -> %s no es adyacente)", zoneDisplayName(fromZone), zoneDisplayName(toZone))
+	}
+	if len(p.Board[toZone]) >= g.maxUnitsPerZone() {
+		return fmt.Errorf("la zona %s ya alcanzó el límite máximo de %d unidades", zoneDisplayName(toZone), g.maxUnitsPerZone())
 	}
 
 	// Remove from old zone and append to new zone
@@ -641,9 +839,26 @@ func (g *GameState) MoveCitizen(playerID, cardInstanceID string, toZone ZoneID) 
 	return nil
 }
 
-// ValidCombatTargetIDs returns the InstanceIDs of enemy Citizens that can currently be attacked.
-// Rule 19: "Una carta en la Zona de combate puede atacar a cualquier carta que no tenga otra carta en una zona de por medio."
-func (g *GameState) ValidCombatTargetIDs(attackerOwnerID string) []string {
+// filterTargetsByDefender returns only Defender units in row if at least one Defender is present;
+// otherwise returns all units in row.
+// Rule 46: "Defensor: debe ser atacado antes que las otras cartas en la misma zona."
+func filterTargetsByDefender(row []*CardInstance) []string {
+	var defenders []string
+	var all []string
+	for _, c := range row {
+		all = append(all, c.InstanceID)
+		if c.Definition.IsDefender {
+			defenders = append(defenders, c.InstanceID)
+		}
+	}
+	if len(defenders) > 0 {
+		return defenders
+	}
+	return all
+}
+
+// ValidCombatTargetIDsForAttacker returns valid enemy target IDs for a specific attacker (accounting for HasReach and IsDefender).
+func (g *GameState) ValidCombatTargetIDsForAttacker(attackerOwnerID string, hasReach bool) []string {
 	_, idx, err := g.GetPlayer(attackerOwnerID)
 	if err != nil {
 		return nil
@@ -653,16 +868,55 @@ func (g *GameState) ValidCombatTargetIDs(attackerOwnerID string) []string {
 		return nil
 	}
 
-	for _, z := range []ZoneID{ZoneCombat, ZoneRoad, ZoneCity} {
-		if len(opp.Board[z]) > 0 {
-			ids := make([]string, 0, len(opp.Board[z]))
-			for _, c := range opp.Board[z] {
-				ids = append(ids, c.InstanceID)
+	if !hasReach {
+		for _, z := range []ZoneID{ZoneCombat, ZoneRoad, ZoneCity} {
+			if len(opp.Board[z]) > 0 {
+				return filterTargetsByDefender(opp.Board[z])
 			}
-			return ids
+		}
+		return nil
+	}
+
+	// Rule 48: "Rango: puede atacar como si no hubiera Ciudadanos en la zona de combate."
+	// An attacker with Rango can attack units in ZoneCombat AND can also bypass Citizens in ZoneCombat
+	// to attack the first occupied zone behind ZoneCombat (unless ZoneCombat has a Tool blocking, though Tools are not Citizens).
+	var result []string
+	seen := make(map[string]bool)
+	addIDs := func(ids []string) {
+		for _, id := range ids {
+			if !seen[id] {
+				seen[id] = true
+				result = append(result, id)
+			}
 		}
 	}
-	return nil
+
+	if len(opp.Board[ZoneCombat]) > 0 {
+		addIDs(filterTargetsByDefender(opp.Board[ZoneCombat]))
+	}
+	for _, z := range []ZoneID{ZoneRoad, ZoneCity} {
+		if len(opp.Board[z]) > 0 {
+			addIDs(filterTargetsByDefender(opp.Board[z]))
+			break
+		}
+	}
+	return result
+}
+
+// ValidCombatTargetIDs returns the InstanceIDs of enemy units that can currently be attacked by any ready attacker.
+func (g *GameState) ValidCombatTargetIDs(attackerOwnerID string) []string {
+	p, _, err := g.GetPlayer(attackerOwnerID)
+	if err != nil || p == nil {
+		return nil
+	}
+	anyReach := false
+	for _, c := range p.Board[ZoneCombat] {
+		if c.Definition.Type == CardTypeCitizen && !c.AttackedThisTurn && !c.MovedThisTurn && c.Definition.HasReach {
+			anyReach = true
+			break
+		}
+	}
+	return g.ValidCombatTargetIDsForAttacker(attackerOwnerID, anyReach)
 }
 
 // AttackCitizen executes a combat attack from a Citizen in the active player's Combat Zone.
@@ -688,8 +942,11 @@ func (g *GameState) AttackCitizen(playerID, attackerID, defenderID string) error
 	if attacker.AttackedThisTurn {
 		return fmt.Errorf("%s ya atacó en este turno", attacker.Definition.Name)
 	}
+	if attacker.MovedThisTurn {
+		return fmt.Errorf("%s no puede atacar porque ya se movió en este turno", attacker.Definition.Name)
+	}
 
-	validTargets := g.ValidCombatTargetIDs(playerID)
+	validTargets := g.ValidCombatTargetIDsForAttacker(playerID, attacker.Definition.HasReach)
 	isValidTarget := false
 	for _, id := range validTargets {
 		if id == defenderID {
@@ -698,7 +955,7 @@ func (g *GameState) AttackCitizen(playerID, attackerID, defenderID string) error
 		}
 	}
 	if !isValidTarget {
-		return fmt.Errorf("objetivo inválido: no podés atacar a una fila trasera mientras haya unidades en una fila intermedia")
+		return fmt.Errorf("objetivo inválido (verificá línea de visión o si hay un Defensor protegiendo la fila)")
 	}
 
 	opp := g.Players[1-idx]
@@ -710,12 +967,14 @@ func (g *GameState) AttackCitizen(playerID, attackerID, defenderID string) error
 	atkDmg := attacker.AttackPower(g.Rules.VitalityMode)
 	defDmg := defender.AttackPower(g.Rules.VitalityMode)
 	attacker.AttackedThisTurn = true
+	g.MovesRemaining = g.countMovableCitizens(p)
 
 	actualAtkDmg, defShieldBroken := g.applyDamage(defender, atkDmg, attacker.Definition.Name)
 
 	var attackerDamage int
 	var atkShieldBroken bool
-	if g.Rules.RetaliationDamage && defDmg > 0 {
+	// Rule 47: "Ataque rápido: no recibe daño al atacar."
+	if g.Rules.RetaliationDamage && defDmg > 0 && !attacker.Definition.HasQuickAttack {
 		var actualDefDmg int
 		actualDefDmg, atkShieldBroken = g.applyDamage(attacker, defDmg, defender.Definition.Name)
 		attackerDamage = -actualDefDmg
@@ -728,6 +987,8 @@ func (g *GameState) AttackCitizen(playerID, attackerID, defenderID string) error
 
 	var targetSnap *CardInstance
 	destroyed := defender.CurrentVitality <= 0
+	g.recordTelemetryDamage(idx, attacker.Definition.ID, attacker.Definition.Name, attacker.Definition.Type, actualAtkDmg, destroyed)
+
 	if destroyed {
 		cp := defender.Clone()
 		cp.CurrentVitality = 0
@@ -737,7 +998,10 @@ func (g *GameState) AttackCitizen(playerID, attackerID, defenderID string) error
 	}
 
 	var attackerSnap *CardInstance
-	attackerDestroyed := g.Rules.RetaliationDamage && attacker.CurrentVitality <= 0
+	attackerDestroyed := g.Rules.RetaliationDamage && !attacker.Definition.HasQuickAttack && attacker.CurrentVitality <= 0
+	if attackerDamage < 0 {
+		g.recordTelemetryDamage(1-idx, defender.Definition.ID, defender.Definition.Name, defender.Definition.Type, -attackerDamage, attackerDestroyed)
+	}
 	if attackerDestroyed {
 		cp := attacker.Clone()
 		cp.CurrentVitality = 0
@@ -749,7 +1013,7 @@ func (g *GameState) AttackCitizen(playerID, attackerID, defenderID string) error
 	banner := fmt.Sprintf("⚔️ %s: %s ataca a %s (-%dV)", p.Name, attacker.Definition.Name, defender.Definition.Name, actualAtkDmg)
 	if defShieldBroken {
 		banner = fmt.Sprintf("🛡️ %s: %s rompe el Escudo de %s (0 daño)", p.Name, attacker.Definition.Name, defender.Definition.Name)
-	} else if g.Rules.RetaliationDamage && defDmg > 0 {
+	} else if g.Rules.RetaliationDamage && defDmg > 0 && !attacker.Definition.HasQuickAttack {
 		if atkShieldBroken {
 			banner = fmt.Sprintf("⚔️ %s: %s (🛡️0) choca contra %s (-%dV)", p.Name, attacker.Definition.Name, defender.Definition.Name, actualAtkDmg)
 		} else {
@@ -828,7 +1092,7 @@ func (g *GameState) SubmitPromptTarget(playerID, targetCardID string) error {
 }
 
 // EndTurn transitions from PhaseMain to PhaseEndOfTurn, triggers end-of-turn abilities,
-// awards Development Points, checks for victory, and advances to the opponent's turn.
+// awards Development Points, checks for victory, and advances to the next turn.
 func (g *GameState) EndTurn(playerID string) error {
 	if g.Phase != PhaseMain {
 		return fmt.Errorf("solo podés finalizar el turno durante la Fase Principal")
@@ -845,6 +1109,17 @@ func (g *GameState) EndTurn(playerID string) error {
 	g.ResumePhase = PhaseEndOfTurn
 	g.addLog(fmt.Sprintf("%s finaliza su turno. Resolviendo efectos de final de turno...", p.Name))
 
+	// Sacrifice temporary reanimated units (e.g. Extensión artificial de vida) at end of turn
+	for _, z := range []ZoneID{ZoneCombat, ZoneRoad, ZoneCity} {
+		row := append([]*CardInstance{}, p.Board[z]...)
+		for _, c := range row {
+			if c.SacrificeAtTurnEnd {
+				g.destroyBoardCard(p, c.InstanceID)
+				g.addLog(fmt.Sprintf("💀 %s fue sacrificado al final del turno.", c.Definition.Name))
+			}
+		}
+	}
+
 	g.queueBoardTriggers(p, TriggerTurnEnd)
 	g.processEffectQueue(PhaseEndOfTurn)
 	g.bumpVersion()
@@ -859,10 +1134,23 @@ func (g *GameState) processEffectQueue(resumePhase GamePhase) {
 		next := g.EffectQueue[0]
 		g.EffectQueue = g.EffectQueue[1:]
 
+		if next.Step.Op == EffectExileAndSummonByV {
+			g.handleExileAndSummonByV(next, resumePhase)
+			if g.Phase == PhaseAwaitingInput {
+				return
+			}
+			continue
+		}
+
 		if next.Step.Target.Requirement == TargetReqSingleCard {
 			candidates := g.findCandidateTargets(next.ControllerID, next.SourceCardID, next.Step.Target)
 			if len(candidates) == 0 {
 				g.addLog(fmt.Sprintf("%s: sin objetivos válidos para el efecto.", next.SourceCardName))
+				if next.DestroySourceCard {
+					if ctrl, _, _ := g.GetPlayer(next.ControllerID); ctrl != nil {
+						g.destroyBoardCard(ctrl, next.SourceCardID)
+					}
+				}
 				continue
 			}
 
@@ -904,33 +1192,189 @@ func (g *GameState) processEffectQueue(resumePhase GamePhase) {
 	}
 }
 
+func (g *GameState) handleExileAndSummonByV(qe QueuedEffect, resumePhase GamePhase) {
+	controller, _, err := g.GetPlayer(qe.ControllerID)
+	if err != nil || controller == nil {
+		return
+	}
+
+	maxExile := qe.Step.Amount
+	if maxExile <= 0 {
+		maxExile = 1
+	}
+
+	// Reset stored vitality before starting the exile sequence
+	g.lastStoredVitality = 0
+
+	// Build sequential steps: up to maxExile single-card exile prompts (only if Citizens exist in Discard),
+	// followed by a final summon_token step whose Vitality uses g.lastStoredVitality!
+	availCitizens := 0
+	for _, c := range controller.Discard {
+		if c.Definition.Type == CardTypeCitizen {
+			availCitizens++
+		}
+	}
+	if availCitizens == 0 {
+		g.addLog(fmt.Sprintf("%s: no hay Ciudadanos en el Descarte para triturar.", qe.SourceCardName))
+		if qe.DestroySourceCard {
+			g.destroyBoardCard(controller, qe.SourceCardID)
+		}
+		return
+	}
+
+	countToExile := maxExile
+	if availCitizens < countToExile {
+		countToExile = availCitizens
+	}
+
+	var expanded []QueuedEffect
+	for i := 0; i < countToExile; i++ {
+		expanded = append(expanded, QueuedEffect{
+			ControllerID:    qe.ControllerID,
+			SourceCardID:    qe.SourceCardID,
+			SourceCardDefID: qe.SourceCardDefID,
+			SourceCardName:  qe.SourceCardName,
+			SourceZone:      qe.SourceZone,
+			Step: EffectStep{
+				Op:                  EffectMoveZone,
+				DestZone:            ZoneExile,
+				StoreVictimVitality: true,
+				Target: TargetRule{
+					Requirement: TargetReqSingleCard,
+					Owner:       TargetOwnerSelf,
+					Zones:       []ZoneID{ZoneDiscard},
+					CardType:    CardTypeCitizen,
+					Prompt:      fmt.Sprintf("%s (%d/%d): Elegí un Ciudadano de tu Descarte para triturar.", qe.SourceCardName, i+1, countToExile),
+				},
+			},
+		})
+	}
+
+	tokenDef := qe.Step.TokenDef
+	if tokenDef == nil {
+		defaultToken := DefaultRecruitToken()
+		tokenDef = &defaultToken
+	}
+	tokenCopy := *tokenDef
+
+	expanded = append(expanded, QueuedEffect{
+		ControllerID:      qe.ControllerID,
+		SourceCardID:      qe.SourceCardID,
+		SourceCardDefID:   qe.SourceCardDefID,
+		SourceCardName:    qe.SourceCardName,
+		SourceZone:        qe.SourceZone,
+		DestroySourceCard: qe.DestroySourceCard,
+		Step: EffectStep{
+			Op:                EffectSummonToken,
+			DestZone:          qe.Step.DestZone,
+			TokenDef:          &tokenCopy,
+			UseStoredVitality: true,
+		},
+	})
+
+	g.EffectQueue = append(expanded, g.EffectQueue...)
+	_ = resumePhase
+}
+
+func (g *GameState) finishMatchWithWinner(winner *PlayerState, reason string) {
+	g.Phase = PhaseGameOver
+	g.ResumePhase = PhaseGameOver
+	if winner != nil {
+		g.WinnerID = winner.ID
+	}
+	g.WinReason = reason
+	g.addLog(reason)
+}
+
 func (g *GameState) completeEndOfTurn() {
 	active := g.Players[g.ActivePlayerIdx]
 	opp := g.Players[1-g.ActivePlayerIdx]
 
-	myCitizens := active.TotalCitizensOnBoard()
-	oppCitizens := opp.TotalCitizensOnBoard()
+	nextPlayerIdx := 1 - g.ActivePlayerIdx
 
-	if myCitizens > oppCitizens {
-		active.DevelopmentPoints++
-		g.addLog(fmt.Sprintf("%s tiene más Ciudadanos (%d vs %d) y gana 1 Punto de Desarrollo (Total: %d/%d).",
-			active.Name, myCitizens, oppCitizens, active.DevelopmentPoints, g.Rules.PointsToWin))
+	if g.Rules.PointsEveryTwoTurns {
+		// Rule 1 & 34: "Cada dos turnos, el jugador que tenga más ciudadanos, recibe un punto de Desarrollo.
+		// Gana el juego primer jugador en llegar a 5 puntos de Desarrollo.
+		// En el siguiente turno, el jugador que vaya ganando será el primero en jugar."
+		if g.TurnNumber%2 == 0 {
+			p0 := g.Players[0]
+			p1 := g.Players[1]
+			c0 := p0.TotalCitizensOnBoard()
+			c1 := p1.TotalCitizensOnBoard()
+
+			if c0 > c1 {
+				p0.DevelopmentPoints++
+				g.addLog(fmt.Sprintf("Fin de Ronda (Turno %d): %s tiene más Ciudadanos (%d vs %d) y gana 1 Punto de Desarrollo (%d/%d).",
+					g.TurnNumber, p0.Name, c0, c1, p0.DevelopmentPoints, g.Rules.PointsToWin))
+			} else if c1 > c0 {
+				p1.DevelopmentPoints++
+				g.addLog(fmt.Sprintf("Fin de Ronda (Turno %d): %s tiene más Ciudadanos (%d vs %d) y gana 1 Punto de Desarrollo (%d/%d).",
+					g.TurnNumber, p1.Name, c1, c0, p1.DevelopmentPoints, g.Rules.PointsToWin))
+			} else {
+				g.addLog(fmt.Sprintf("Fin de Ronda (Turno %d): Empate en Ciudadanos (%d vs %d). Nadie recibe punto.",
+					g.TurnNumber, c0, c1))
+			}
+
+			if p0.DevelopmentPoints >= g.Rules.PointsToWin {
+				g.finishMatchWithWinner(p0, fmt.Sprintf("¡%s alcanzó %d Puntos de Desarrollo y ganó la partida!", p0.Name, p0.DevelopmentPoints))
+				return
+			}
+			if p1.DevelopmentPoints >= g.Rules.PointsToWin {
+				g.finishMatchWithWinner(p1, fmt.Sprintf("¡%s alcanzó %d Puntos de Desarrollo y ganó la partida!", p1.Name, p1.DevelopmentPoints))
+				return
+			}
+
+			// Leading player plays first in the next round
+			if p0.DevelopmentPoints > p1.DevelopmentPoints {
+				nextPlayerIdx = 0
+			} else if p1.DevelopmentPoints > p0.DevelopmentPoints {
+				nextPlayerIdx = 1
+			}
+		}
 	} else {
-		g.addLog(fmt.Sprintf("Recuento de Ciudadanos al final del turno: %s (%d) vs %s (%d). No se otorgan puntos.",
-			active.Name, myCitizens, opp.Name, oppCitizens))
+		// Per-turn Development Point scoring
+		myCitizens := active.TotalCitizensOnBoard()
+		oppCitizens := opp.TotalCitizensOnBoard()
+
+		if myCitizens > oppCitizens {
+			active.DevelopmentPoints++
+			g.addLog(fmt.Sprintf("%s tiene más Ciudadanos (%d vs %d) y gana 1 Punto de Desarrollo (Total: %d/%d).",
+				active.Name, myCitizens, oppCitizens, active.DevelopmentPoints, g.Rules.PointsToWin))
+		} else {
+			g.addLog(fmt.Sprintf("Recuento de Ciudadanos al final del turno: %s (%d) vs %s (%d). No se otorgan puntos.",
+				active.Name, myCitizens, opp.Name, oppCitizens))
+		}
+
+		if active.DevelopmentPoints >= g.Rules.PointsToWin {
+			g.finishMatchWithWinner(active, fmt.Sprintf("¡%s alcanzó %d Puntos de Desarrollo y ganó la partida!", active.Name, active.DevelopmentPoints))
+			return
+		}
 	}
 
-	if active.DevelopmentPoints >= g.Rules.PointsToWin {
-		g.Phase = PhaseGameOver
-		g.ResumePhase = PhaseGameOver
-		g.WinnerID = active.ID
-		g.WinReason = fmt.Sprintf("¡%s alcanzó %d Puntos de Desarrollo y ganó la partida!", active.Name, active.DevelopmentPoints)
-		g.addLog(g.WinReason)
-		return
+	// Safety turn cap for simulations or fatigue games
+	if g.TurnNumber >= 80 || (len(active.Deck) == 0 && len(opp.Deck) == 0 && len(active.Hand) == 0 && len(opp.Hand) == 0 && g.TurnNumber >= 30) {
+		p0 := g.Players[0]
+		p1 := g.Players[1]
+		if p0.DevelopmentPoints > p1.DevelopmentPoints {
+			g.finishMatchWithWinner(p0, fmt.Sprintf("Fin por límite de campaña: %s gana por Puntos de Desarrollo (%d a %d).", p0.Name, p0.DevelopmentPoints, p1.DevelopmentPoints))
+			return
+		} else if p1.DevelopmentPoints > p0.DevelopmentPoints {
+			g.finishMatchWithWinner(p1, fmt.Sprintf("Fin por límite de campaña: %s gana por Puntos de Desarrollo (%d a %d).", p1.Name, p1.DevelopmentPoints, p0.DevelopmentPoints))
+			return
+		} else if p0.TotalCitizensOnBoard() > p1.TotalCitizensOnBoard() {
+			g.finishMatchWithWinner(p0, fmt.Sprintf("Fin por límite de campaña: %s gana por desempate de Ciudadanos en mesa.", p0.Name))
+			return
+		} else if p1.TotalCitizensOnBoard() > p0.TotalCitizensOnBoard() {
+			g.finishMatchWithWinner(p1, fmt.Sprintf("Fin por límite de campaña: %s gana por desempate de Ciudadanos en mesa.", p1.Name))
+			return
+		} else {
+			g.finishMatchWithWinner(nil, "La partida concluyó en empate tras agotarse ambos ejércitos.")
+			return
+		}
 	}
 
 	// Start next player's turn
-	g.beginTurn(1 - g.ActivePlayerIdx)
+	g.beginTurn(nextPlayerIdx)
 }
 
 func (g *GameState) executeEffectStepWithTarget(qe QueuedEffect, chosenTargetID string) {
@@ -941,11 +1385,26 @@ func (g *GameState) executeEffectStepWithTarget(qe QueuedEffect, chosenTargetID 
 	opp := g.Players[1-ctrlIdx]
 	step := qe.Step
 
+	defer func() {
+		if qe.DestroySourceCard {
+			if srcCard, _, _ := g.findBoardCard(controller, qe.SourceCardID); srcCard != nil && srcCard.CurrentVitality <= 0 {
+				g.destroyBoardCard(controller, qe.SourceCardID)
+				g.addLog(fmt.Sprintf("💀 %s fue destruido tras agotar su Armadura/Vitalidad por Desgaste.", qe.SourceCardName))
+			}
+		}
+	}()
+
 	switch step.Op {
 	case EffectSummonToken:
 		tokenDef := DefaultRecruitToken()
 		if step.TokenDef != nil {
 			tokenDef = *step.TokenDef
+		}
+		if step.UseStoredVitality {
+			if g.lastStoredVitality <= 0 {
+				return
+			}
+			tokenDef.Vitality = g.lastStoredVitality
 		}
 		if tokenDef.Count <= 0 {
 			tokenDef.Count = 1
@@ -958,13 +1417,18 @@ func (g *GameState) executeEffectStepWithTarget(qe QueuedEffect, chosenTargetID 
 		}
 
 		totalCount := tokenDef.Count
-		if tokenDef.BonusCountIfEnemyMorePoints > 0 && opp != nil && opp.DevelopmentPoints > controller.DevelopmentPoints {
+		if step.ScaleCountByAlliedDeathsThisTurn {
+			totalCount = controller.AlliedDeathsThisTurn
+			if totalCount <= 0 {
+				g.addLog(fmt.Sprintf("%s: ningún Ciudadano aliado murió este turno (0 convocados).", qe.SourceCardName))
+				return
+			}
+		} else if tokenDef.BonusCountIfEnemyMorePoints > 0 && opp != nil && opp.DevelopmentPoints > controller.DevelopmentPoints {
 			totalCount += tokenDef.BonusCountIfEnemyMorePoints
 		}
 
 		destZone := step.DestZone
 		if destZone == ZoneSameRow || destZone == "" {
-			// Check if source card is still on board; otherwise use its recorded SourceZone
 			if srcCard, currentZone, _ := g.findBoardCard(controller, qe.SourceCardID); srcCard != nil {
 				destZone = currentZone
 			} else if IsBoardZone(qe.SourceZone) {
@@ -980,21 +1444,28 @@ func (g *GameState) executeEffectStepWithTarget(qe QueuedEffect, chosenTargetID 
 		}
 
 		var lastTokenID string
+		summoned := 0
 		for i := 0; i < totalCount; i++ {
+			if len(controller.Board[destZone]) >= g.maxUnitsPerZone() {
+				break
+			}
 			inst := &CardInstance{
 				InstanceID: g.nextInstanceID("token"),
 				OwnerID:    controller.ID,
 				Definition: CardDefinition{
-					ID:          tokenDef.ID,
-					Name:        tokenDef.Name,
-					Type:        CardTypeCitizen,
-					Vitality:    tokenDef.Vitality,
-					Description: tokenDesc,
-					Abilities:   tokenDef.Abilities,
-					HasShield:   tokenDef.HasShield,
-					IsToken:     true,
-					ArtColor:    "#64748b",
-					ArtIcon:     tokenDef.ArtIcon,
+					ID:             tokenDef.ID,
+					Name:           tokenDef.Name,
+					Type:           CardTypeCitizen,
+					Vitality:       tokenDef.Vitality,
+					Description:    tokenDesc,
+					Abilities:      tokenDef.Abilities,
+					HasShield:      tokenDef.HasShield,
+					IsDefender:     tokenDef.IsDefender,
+					HasQuickAttack: tokenDef.HasQuickAttack,
+					HasReach:       tokenDef.HasReach,
+					IsToken:        true,
+					ArtColor:       "#64748b",
+					ArtIcon:        tokenDef.ArtIcon,
 				},
 				BaseVitality:     tokenDef.Vitality,
 				CurrentVitality:  tokenDef.Vitality,
@@ -1005,17 +1476,20 @@ func (g *GameState) executeEffectStepWithTarget(qe QueuedEffect, chosenTargetID 
 			}
 			lastTokenID = inst.InstanceID
 			controller.Board[destZone] = append(controller.Board[destZone], inst)
+			summoned++
 		}
-		g.addLog(fmt.Sprintf("%s invocó %d %s (%dV) en %s.", controller.Name, totalCount, tokenDef.Name, tokenDef.Vitality, zoneDisplayName(destZone)))
-		g.recordAnimStep(ActionAnimationEvent{
-			Type:           AnimEffect,
-			ActorID:        controller.ID,
-			ActorName:      controller.Name,
-			CardInstanceID: lastTokenID,
-			CardName:       tokenDef.Name,
-			ToZone:         destZone,
-			BannerText:     fmt.Sprintf("✨ %s invoca %d %s (%dV) en %s", qe.SourceCardName, totalCount, tokenDef.Name, tokenDef.Vitality, zoneDisplayName(destZone)),
-		})
+		if summoned > 0 {
+			g.addLog(fmt.Sprintf("%s invocó %d %s (%dV) en %s.", controller.Name, summoned, tokenDef.Name, tokenDef.Vitality, zoneDisplayName(destZone)))
+			g.recordAnimStep(ActionAnimationEvent{
+				Type:           AnimEffect,
+				ActorID:        controller.ID,
+				ActorName:      controller.Name,
+				CardInstanceID: lastTokenID,
+				CardName:       tokenDef.Name,
+				ToZone:         destZone,
+				BannerText:     fmt.Sprintf("✨ %s invoca %d %s (%dV) en %s", qe.SourceCardName, summoned, tokenDef.Name, tokenDef.Vitality, zoneDisplayName(destZone)),
+			})
+		}
 
 	case EffectDrawCards:
 		amount := step.Amount
@@ -1025,12 +1499,27 @@ func (g *GameState) executeEffectStepWithTarget(qe QueuedEffect, chosenTargetID 
 		drawn := g.drawCards(controller, amount)
 		g.addLog(fmt.Sprintf("%s (%s): levantó %d carta(s).", qe.SourceCardName, controller.Name, drawn))
 
+	case EffectCycleHand:
+		handCopy := append([]*CardInstance{}, controller.Hand...)
+		count := len(handCopy)
+		if count > 0 {
+			for _, hc := range handCopy {
+				g.discardCardFromHand(controller, hc.InstanceID, qe.SourceCardName)
+			}
+			drawn := g.drawCards(controller, count)
+			g.addLog(fmt.Sprintf("%s (%s) descartó %d carta(s) y levantó %d.", qe.SourceCardName, controller.Name, count, drawn))
+		}
+
 	case EffectDiscard:
 		targets := g.resolveTargetsForExecution(qe, chosenTargetID)
 		for _, t := range targets {
 			ownerPlayer, _, _ := g.GetPlayer(t.OwnerID)
 			if ownerPlayer == nil {
 				continue
+			}
+			if step.StoreTargetCardType {
+				g.lastStoredCardType = t.Definition.Type
+				g.lastStoredCardID = t.InstanceID
 			}
 			g.discardCardFromHand(ownerPlayer, t.InstanceID, qe.SourceCardName)
 		}
@@ -1040,12 +1529,15 @@ func (g *GameState) executeEffectStepWithTarget(qe QueuedEffect, chosenTargetID 
 		if !IsBoardZone(destZone) {
 			destZone = ZoneRoad
 		}
-		// Find the source card in controller's Discard (or anywhere off-board)
+		if len(controller.Board[destZone]) >= g.maxUnitsPerZone() {
+			return
+		}
 		var selfCard *CardInstance
 		for i, c := range controller.Discard {
 			if c.InstanceID == qe.SourceCardID {
 				selfCard = c
 				controller.Discard = append(controller.Discard[:i], controller.Discard[i+1:]...)
+				controller.CardsLeftDiscardThisTurn++
 				break
 			}
 		}
@@ -1081,11 +1573,12 @@ func (g *GameState) executeEffectStepWithTarget(qe QueuedEffect, chosenTargetID 
 		if len(controller.Discard) >= reqCount {
 			milled := controller.Discard[:reqCount]
 			controller.Discard = append([]*CardInstance{}, controller.Discard[reqCount:]...)
+			controller.CardsLeftDiscardThisTurn += reqCount
 			for _, mc := range milled {
 				mc.Zone = ZoneExile
 				controller.Exile = append(controller.Exile, mc)
 			}
-			g.addLog(fmt.Sprintf("⚙️ %s (%s) trituró %d carta(s) de su Descarte al Exilio.", qe.SourceCardName, controller.Name, reqCount))
+			g.addLog(fmt.Sprintf("⚙️ %s (%s) trituró %d carta(s) de su Descarte.", qe.SourceCardName, controller.Name, reqCount))
 			g.recordAnimStep(ActionAnimationEvent{
 				Type:           AnimEffect,
 				ActorID:        controller.ID,
@@ -1118,8 +1611,11 @@ func (g *GameState) executeEffectStepWithTarget(qe QueuedEffect, chosenTargetID 
 
 	case EffectDealDamage:
 		dmg := step.Amount
+		if step.UseStoredVitality {
+			dmg = g.lastStoredVitality
+		}
 		if dmg <= 0 {
-			dmg = 1
+			return
 		}
 		targets := g.resolveTargetsForExecution(qe, chosenTargetID)
 		for _, t := range targets {
@@ -1133,6 +1629,9 @@ func (g *GameState) executeEffectStepWithTarget(qe QueuedEffect, chosenTargetID 
 			}
 			var targetSnap *CardInstance
 			destroyed := t.CurrentVitality <= 0
+			if t.OwnerID != controller.ID {
+				g.recordTelemetryDamage(ctrlIdx, qe.SourceCardDefID, qe.SourceCardName, "", actualDmg, destroyed)
+			}
 			if destroyed {
 				cp := t.Clone()
 				cp.CurrentVitality = 0
@@ -1160,16 +1659,31 @@ func (g *GameState) executeEffectStepWithTarget(qe QueuedEffect, chosenTargetID 
 		}
 
 	case EffectDestroy:
+		if step.StoreVictimVitality {
+			g.lastStoredVitality = 0
+		}
 		targets := g.resolveTargetsForExecution(qe, chosenTargetID)
 		for _, t := range targets {
 			ownerPlayer, _, _ := g.GetPlayer(t.OwnerID)
 			if ownerPlayer == nil {
 				continue
 			}
+			if step.StoreVictimVitality {
+				g.lastStoredVitality += t.CurrentVitality
+			}
+			if t.OwnerID != controller.ID {
+				g.recordTelemetryDamage(ctrlIdx, qe.SourceCardDefID, qe.SourceCardName, "", t.CurrentVitality, true)
+			}
 			cp := t.Clone()
 			cp.CurrentVitality = 0
 			g.destroyBoardCard(ownerPlayer, t.InstanceID)
 			g.addLog(fmt.Sprintf("%s (%s) destruyó a %s.", qe.SourceCardName, controller.Name, t.Definition.Name))
+			if step.GrantSelfShieldOnSuccess {
+				if srcCard, _, _ := g.findBoardCard(controller, qe.SourceCardID); srcCard != nil {
+					srcCard.ShieldActive = true
+					g.addLog(fmt.Sprintf("🛡️ %s ganó Escudo tras sacrificar a %s.", srcCard.Definition.Name, t.Definition.Name))
+				}
+			}
 			g.recordAnimStep(ActionAnimationEvent{
 				Type:               AnimEffect,
 				ActorID:            controller.ID,
@@ -1190,12 +1704,31 @@ func (g *GameState) executeEffectStepWithTarget(qe QueuedEffect, chosenTargetID 
 		if dest == "" {
 			dest = ZoneHand
 		}
+		if dest == ZoneSameRow {
+			if srcCard, currentZone, _ := g.findBoardCard(controller, qe.SourceCardID); srcCard != nil {
+				dest = currentZone
+			} else if IsBoardZone(qe.SourceZone) {
+				dest = qe.SourceZone
+			} else {
+				dest = ZoneCity
+			}
+		}
 		for _, t := range targets {
 			ownerPlayer, _, _ := g.GetPlayer(t.OwnerID)
 			if ownerPlayer == nil {
 				continue
 			}
+			if step.StoreVictimVitality {
+				v := t.CurrentVitality
+				if v <= 0 {
+					v = t.Definition.Vitality
+				}
+				g.lastStoredVitality += v
+			}
 			g.moveCardToZone(ownerPlayer, t.InstanceID, dest)
+			if step.SacrificeAtTurnEnd {
+				t.SacrificeAtTurnEnd = true
+			}
 			g.addLog(fmt.Sprintf("%s (%s) movió a %s hacia %s.", qe.SourceCardName, controller.Name, t.Definition.Name, zoneDisplayName(dest)))
 			if step.ShuffleDeck {
 				g.shuffleDeck(ownerPlayer)
@@ -1214,6 +1747,20 @@ func (g *GameState) executeEffectStepWithTarget(qe QueuedEffect, chosenTargetID 
 
 	case EffectModifyStat:
 		delta := step.Amount
+		if step.UseStoredVitality {
+			delta = g.lastStoredVitality
+		} else if step.ScaleByDiscardCitizens {
+			cnt := 0
+			for _, dc := range controller.Discard {
+				if dc.Definition.Type == CardTypeCitizen {
+					cnt++
+				}
+			}
+			delta = cnt
+		}
+		if delta == 0 {
+			return
+		}
 		targets := g.resolveTargetsForExecution(qe, chosenTargetID)
 		for _, t := range targets {
 			ownerPlayer, _, _ := g.GetPlayer(t.OwnerID)
@@ -1287,6 +1834,18 @@ func (g *GameState) resolveTargetsForExecution(qe QueuedEffect, chosenTargetID s
 			}
 		}
 		return nil
+	case TargetReqWeakestEnemy:
+		cands := g.findCandidateTargets(qe.ControllerID, qe.SourceCardID, qe.Step.Target)
+		if len(cands) == 0 {
+			return nil
+		}
+		weakest := cands[0]
+		for _, c := range cands[1:] {
+			if c.CurrentVitality < weakest.CurrentVitality {
+				weakest = c
+			}
+		}
+		return []*CardInstance{weakest}
 	case TargetReqAllMatching:
 		return g.findCandidateTargets(qe.ControllerID, qe.SourceCardID, qe.Step.Target)
 	default:
@@ -1341,14 +1900,27 @@ func (g *GameState) findCandidateTargets(controllerID, sourceCardID string, rule
 				pile = p.Exile
 			}
 			for _, c := range pile {
+				if rule.ExcludeSourceCard && c.InstanceID == sourceCardID {
+					continue
+				}
 				if rule.CardType != "" && c.Definition.Type != rule.CardType {
 					continue
+				}
+				if rule.ExcludeCardType != "" && c.Definition.Type == rule.ExcludeCardType {
+					continue
+				}
+				if rule.OnlyLocations && !c.Definition.IsLocation {
+					continue
+				}
+				if rule.MatchStoredCardType {
+					if g.lastStoredCardType == "" || c.Definition.Type != g.lastStoredCardType || c.InstanceID == g.lastStoredCardID {
+						continue
+					}
 				}
 				result = append(result, c)
 			}
 		}
 	}
-	_ = sourceCardID
 	return result
 }
 
@@ -1390,27 +1962,34 @@ func (g *GameState) destroyBoardCard(p *PlayerState, instanceID string) {
 	row := p.Board[zone]
 	p.Board[zone] = append(row[:pos], row[pos+1:]...)
 
+	if card.Definition.Type == CardTypeCitizen {
+		p.AlliedDeathsThisTurn++
+	}
+
 	// Reset card vitality when leaving the board; tokens do not go to discard pile
 	card.CurrentVitality = card.BaseVitality
 	card.PlayedThisTurn = false
 	card.MovedThisTurn = false
 	card.AttackedThisTurn = false
+	card.UsedAbilityThisTurn = false
+	card.SacrificeAtTurnEnd = false
 	card.ShieldActive = false
 	if !card.Definition.IsToken {
 		card.Zone = ZoneDiscard
 		p.Discard = append(p.Discard, card)
 	}
 
-	// Queue "Último deseo" (on_death) abilities when destroyed on the board
+	// Queue "Al morir" (on_death) abilities when destroyed on the board
 	for _, ab := range card.Definition.Abilities {
 		if ab.Trigger == TriggerOnDeath {
 			for _, step := range ab.Steps {
 				g.EffectQueue = append(g.EffectQueue, QueuedEffect{
-					ControllerID:   p.ID,
-					SourceCardID:   card.InstanceID,
-					SourceCardName: card.Definition.Name,
-					SourceZone:     zone,
-					Step:           step,
+					ControllerID:    p.ID,
+					SourceCardID:    card.InstanceID,
+					SourceCardDefID: card.Definition.ID,
+					SourceCardName:  card.Definition.Name,
+					SourceZone:      zone,
+					Step:            step,
 				})
 			}
 		}
@@ -1437,6 +2016,8 @@ func (g *GameState) discardCardFromHand(p *PlayerState, instanceID string, sourc
 	card.PlayedThisTurn = false
 	card.MovedThisTurn = false
 	card.AttackedThisTurn = false
+	card.UsedAbilityThisTurn = false
+	card.SacrificeAtTurnEnd = false
 	card.ShieldActive = false
 	if !card.Definition.IsToken {
 		p.Discard = append(p.Discard, card)
@@ -1454,24 +2035,29 @@ func (g *GameState) discardCardFromHand(p *PlayerState, instanceID string, sourc
 		BannerText:     fmt.Sprintf("🗑️ %s descarta a %s", p.Name, card.Definition.Name),
 	})
 
-	// Trigger "Cuando descartas esta carta" (on_discard) abilities on the discarded card
+	// Trigger "Al descartar" (on_discard) abilities on the discarded card itself
 	for _, ab := range card.Definition.Abilities {
 		if ab.Trigger == TriggerOnDiscard {
 			for _, step := range ab.Steps {
 				g.EffectQueue = append(g.EffectQueue, QueuedEffect{
-					ControllerID:   p.ID,
-					SourceCardID:   card.InstanceID,
-					SourceCardName: card.Definition.Name,
-					SourceZone:     ZoneDiscard,
-					Step:           step,
+					ControllerID:    p.ID,
+					SourceCardID:    card.InstanceID,
+					SourceCardDefID: card.Definition.ID,
+					SourceCardName:  card.Definition.Name,
+					SourceZone:      ZoneDiscard,
+					Step:            step,
 				})
 			}
 		}
 	}
+
+	// Trigger "Cuando descartas una carta" (on_any_discard) abilities on friendly board cards (e.g. Lanzador de escombros, Pala neumática)
+	g.queueBoardTriggers(p, TriggerOnAnyDiscard)
 }
 
 func (g *GameState) moveCardToZone(p *PlayerState, instanceID string, dest ZoneID) {
 	var card *CardInstance
+	leftDiscard := false
 
 	// Remove from current location
 	if bCard, bZone, bPos := g.findBoardCard(p, instanceID); bCard != nil {
@@ -1489,11 +2075,11 @@ func (g *GameState) moveCardToZone(p *PlayerState, instanceID string, dest ZoneI
 			}
 			return nil
 		}
-		if card = removeFromSlice(&p.Discard); card == nil {
-			if card = removeFromSlice(&p.Deck); card == nil {
-				if card = removeFromSlice(&p.Hand); card == nil {
-					card = removeFromSlice(&p.Exile)
-				}
+		if card = removeFromSlice(&p.Discard); card != nil {
+			leftDiscard = true
+		} else if card = removeFromSlice(&p.Deck); card == nil {
+			if card = removeFromSlice(&p.Hand); card == nil {
+				card = removeFromSlice(&p.Exile)
 			}
 		}
 	}
@@ -1501,16 +2087,21 @@ func (g *GameState) moveCardToZone(p *PlayerState, instanceID string, dest ZoneI
 	if card == nil {
 		return
 	}
+	if leftDiscard {
+		p.CardsLeftDiscardThisTurn++
+	}
 
 	card.Zone = dest
 	card.CurrentVitality = card.BaseVitality
 	card.PlayedThisTurn = false
 	card.MovedThisTurn = false
 	card.AttackedThisTurn = false
+	card.UsedAbilityThisTurn = false
+	card.SacrificeAtTurnEnd = false
 
 	switch dest {
 	case ZoneHand:
-		if !card.Definition.IsToken {
+		if !card.Definition.IsToken && len(p.Hand) < g.maxHandSize() {
 			p.Hand = append(p.Hand, card)
 		}
 	case ZoneDiscard:
@@ -1526,9 +2117,20 @@ func (g *GameState) moveCardToZone(p *PlayerState, instanceID string, dest ZoneI
 			p.Deck = append(p.Deck, card)
 		}
 	case ZoneCity, ZoneRoad, ZoneCombat:
-		card.PlayedThisTurn = true
-		card.ShieldActive = card.Definition.HasShield
-		p.Board[dest] = append(p.Board[dest], card)
+		if len(p.Board[dest]) >= g.maxUnitsPerZone() {
+			for _, fallback := range []ZoneID{ZoneCity, ZoneRoad, ZoneCombat} {
+				if len(p.Board[fallback]) < g.maxUnitsPerZone() {
+					dest = fallback
+					card.Zone = dest
+					break
+				}
+			}
+		}
+		if len(p.Board[dest]) < g.maxUnitsPerZone() {
+			card.PlayedThisTurn = true
+			card.ShieldActive = card.Definition.HasShield
+			p.Board[dest] = append(p.Board[dest], card)
+		}
 	}
 }
 
@@ -1595,30 +2197,26 @@ func (g *GameState) BuildPlayerView(playerID string) (*PlayerGameView, error) {
 	var promptCopy *PendingPrompt
 	if g.PendingPrompt != nil {
 		cp := *g.PendingPrompt
-		// Hide candidate details from the non-selecting player if it's a private zone like Deck
 		if cp.PlayerID != playerID {
 			cp.CandidateCards = nil
+			cp.ValidTargetIDs = nil
 		}
 		promptCopy = &cp
 	}
 
-	var recentSteps []ActionStepSnapshot
-	for _, rec := range g.animSteps {
-		youSnap := rec.PlayersSnapshot[idx]
-		var oppSnap *SanitizedPlayerView
-		if g.Players[1-idx] != nil {
-			os := rec.PlayersSnapshot[1-idx]
-			os.Hand = nil // Mask opponent hand in historical snapshots
-			oppSnap = &os
-		}
+	recentSteps := make([]ActionStepSnapshot, 0, len(g.animSteps))
+	for _, r := range g.animSteps {
+		youStep := r.PlayersSnapshot[idx]
+		oppStep := r.PlayersSnapshot[1-idx]
+		oppStep.Hand = nil
 		recentSteps = append(recentSteps, ActionStepSnapshot{
-			Event:          rec.Event,
-			You:            youSnap,
-			Opponent:       oppSnap,
-			TurnNumber:     rec.TurnNumber,
-			Phase:          rec.Phase,
-			ActivePlayerID: rec.ActivePlayerID,
-			IsYourTurn:     rec.ActivePlayerID == playerID && rec.Phase != PhaseWaitingForPlayers && rec.Phase != PhaseGameOver,
+			Event:          r.Event,
+			You:            youStep,
+			Opponent:       &oppStep,
+			TurnNumber:     r.TurnNumber,
+			Phase:          r.Phase,
+			ActivePlayerID: r.ActivePlayerID,
+			IsYourTurn:     r.ActivePlayerID == playerID,
 		})
 	}
 
@@ -1631,9 +2229,9 @@ func (g *GameState) BuildPlayerView(playerID string) (*PlayerGameView, error) {
 		OriginPhase:         originPhase,
 		TurnNumber:          g.TurnNumber,
 		ActivePlayerID:      activeID,
-		IsYourTurn:          activeID == playerID && g.Phase != PhaseWaitingForPlayers && g.Phase != PhaseGameOver,
+		IsYourTurn:          activeID == playerID,
 		PlaysRemaining:      g.PlaysRemaining,
-		MovesRemaining:      g.countMovableCitizens(you),
+		MovesRemaining:      g.MovesRemaining,
 		CanPlayInCombatZone: g.CanPlayInCombat(playerID),
 		ValidCombatTargets:  g.ValidCombatTargetIDs(playerID),
 		PendingPrompt:       promptCopy,
@@ -1641,7 +2239,7 @@ func (g *GameState) BuildPlayerView(playerID string) (*PlayerGameView, error) {
 		Opponent:            oppView,
 		WinnerID:            g.WinnerID,
 		WinReason:           g.WinReason,
-		Log:                 append([]LogEntry{}, g.Log...),
+		Log:                 g.Log,
 		RecentSteps:         recentSteps,
 	}, nil
 }
@@ -1653,7 +2251,7 @@ func zoneDisplayName(z ZoneID) string {
 	case ZoneRoad:
 		return "El Camino"
 	case ZoneCombat:
-		return "Zona de Combate"
+		return "la Zona de Combate"
 	case ZoneHand:
 		return "la Mano"
 	case ZoneDeck:
@@ -1661,7 +2259,7 @@ func zoneDisplayName(z ZoneID) string {
 	case ZoneDiscard:
 		return "el Descarte"
 	case ZoneExile:
-		return "el Exilio"
+		return "la Trituradora"
 	default:
 		return string(z)
 	}

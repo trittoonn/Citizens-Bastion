@@ -5,6 +5,8 @@ import {
   GameRulesConfig,
   LobbySummary,
   PlayerGameView,
+  SimulationReport,
+  SimulationRequest,
 } from '../types/game';
 
 declare global {
@@ -121,4 +123,17 @@ export async function submitGameAction(
     }
   );
   return data.view;
+}
+
+export async function runAiVsAiSimulation(
+  params: SimulationRequest
+): Promise<SimulationReport> {
+  const data = await requestJSON<{ report: SimulationReport }>(
+    `${API_BASE}/simulations/ai-vs-ai`,
+    {
+      method: 'POST',
+      body: JSON.stringify(params),
+    }
+  );
+  return data.report;
 }

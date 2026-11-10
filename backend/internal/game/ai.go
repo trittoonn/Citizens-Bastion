@@ -1,7 +1,6 @@
 package game
 
 import (
-	"math/rand"
 	"sort"
 )
 
@@ -31,7 +30,7 @@ func (g *GameState) RunAITurnIfNeeded(aiPlayerID string, diff AIDifficulty) {
 	}
 
 	// Guard against infinite loops with a generous safety cap
-	for safety := 0; safety < 60; safety++ {
+	for safety := 0; safety < 80; safety++ {
 		if g.Phase == PhaseGameOver || g.Phase == PhaseWaitingForPlayers {
 			return
 		}
@@ -71,19 +70,16 @@ func (g *GameState) RunAITurnIfNeeded(aiPlayerID string, diff AIDifficulty) {
 			continue
 		}
 
-		// Otherwise it's the human player's turn or waiting on human mulligan/prompt
+		// Otherwise it's the other player's turn or waiting on other player's mulligan/prompt
 		return
 	}
 }
 
 func (g *GameState) chooseAIMulligan(ai *PlayerState, diff AIDifficulty) []string {
 	if diff == AIDifficultyEasy {
-		// Easy AI keeps its initial hand
 		return nil
 	}
 
-	// Medium & Hard AI: Mulligan Situational Events (like Sobreviviente or Pacto or Dado de baja)
-	// so the opening hand has strong Citizens to deploy on Turn 1/2.
 	var toMulligan []string
 	citizenCount := 0
 	for _, c := range ai.Hand {
@@ -95,8 +91,12 @@ func (g *GameState) chooseAIMulligan(ai *PlayerState, diff AIDifficulty) []strin
 	for _, c := range ai.Hand {
 		if c.Definition.Type == CardTypeEvent {
 			if c.Definition.ID == "el_regreso_del_sobreviviente" ||
+				c.Definition.ID == "busqueda_del_tesoro" ||
+				c.Definition.ID == "extension_artificial_de_vida" ||
+				c.Definition.ID == "la_noche_de_los_muertos_vivos" ||
 				c.Definition.ID == "dado_de_baja" ||
-				(c.Definition.ID == "pacto_de_sacrificio" && diff == AIDifficultyHard) ||
+				c.Definition.ID == "retirada" ||
+				((c.Definition.ID == "pacto_de_sacrificio" || c.Definition.ID == "municiones_vivas") && diff == AIDifficultyHard) ||
 				citizenCount < 2 {
 				toMulligan = append(toMulligan, c.InstanceID)
 			}
@@ -106,22 +106,19 @@ func (g *GameState) chooseAIMulligan(ai *PlayerState, diff AIDifficulty) []strin
 }
 
 func (g *GameState) takeAIMainPhaseStep(ai, human *PlayerState, diff AIDifficulty) bool {
-	// Step A: Move an existing Citizen forward if beneficial (before or after playing)
-	if g.MovesRemaining > 0 {
-		if moved := g.tryAIMove(ai, human, diff); moved {
-			return true
-		}
+	// Step A: Attack first with any ready Citizen ALREADY in the Combat Zone (before moving, since moving prevents attacking)
+	if attacked := g.tryAIAttack(ai, human, diff); attacked {
+		return true
 	}
 
-	// Step B: Attack with any ready Citizen in the Combat Zone
-	if attacked := g.tryAIAttack(ai, human, diff); attacked {
+	// Step B: Activate any ready TriggerActivatedWear ability on board (e.g. Cremadora Sospechosa)
+	if activated := g.tryAIActivateWear(ai); activated {
 		return true
 	}
 
 	// Step C: Play a card from Hand (or playable from Discard) if plays remain
 	if g.PlaysRemaining > 0 {
-		// On Easy difficulty, if AI already played at least 1 card this turn, 35% chance to stop playing early
-		if diff == AIDifficultyEasy && g.PlaysRemaining < g.Rules.MaxPlaysPerTurn && rand.Intn(100) < 35 {
+		if diff == AIDifficultyEasy && g.PlaysRemaining < g.Rules.MaxPlaysPerTurn && g.randIntn(100) < 35 {
 			return false
 		}
 		if played := g.tryAIPlayCard(ai, human, diff); played {
@@ -134,6 +131,34 @@ func (g *GameState) takeAIMainPhaseStep(ai, human *PlayerState, diff AIDifficult
 		return true
 	}
 
+	// Step E: Move any remaining eligible Citizens forward (Road -> Combat or City -> Road) for next turn
+	if g.MovesRemaining > 0 {
+		if moved := g.tryAIMove(ai, human, diff); moved {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (g *GameState) tryAIActivateWear(ai *PlayerState) bool {
+	for _, z := range []ZoneID{ZoneCity, ZoneRoad, ZoneCombat} {
+		if len(ai.Board[z]) >= g.maxUnitsPerZone() {
+			continue
+		}
+		for _, c := range ai.Board[z] {
+			if c.UsedAbilityThisTurn {
+				continue
+			}
+			for _, ab := range c.Definition.Abilities {
+				if ab.Trigger == TriggerActivatedWear {
+					if err := g.ActivateCardAbility(ai.ID, c.InstanceID); err == nil {
+						return true
+					}
+				}
+			}
+		}
+	}
 	return false
 }
 
@@ -142,65 +167,65 @@ func (g *GameState) tryAIMove(ai, human *PlayerState, diff AIDifficulty) bool {
 		return false
 	}
 
-	// Easy AI only moves 50% of the time, and moves the first movable Citizen from City -> Road or Road -> Combat
-	if diff == AIDifficultyEasy && rand.Intn(100) < 50 {
+	if diff == AIDifficultyEasy && g.randIntn(100) < 50 {
 		return false
 	}
 
-	// Prefer moving the highest-Vitality Citizen from Road -> Combat so it can attack right away!
-	var roadCandidates []*CardInstance
-	for _, c := range ai.Board[ZoneRoad] {
-		if !c.PlayedThisTurn && !c.MovedThisTurn {
-			roadCandidates = append(roadCandidates, c)
+	maxZone := g.maxUnitsPerZone()
+
+	// Move strong Citizens from Road -> Combat so they can attack next turn
+	if len(ai.Board[ZoneCombat]) < maxZone {
+		var roadCandidates []*CardInstance
+		for _, c := range ai.Board[ZoneRoad] {
+			if c.Definition.Type == CardTypeCitizen && !c.PlayedThisTurn && !c.MovedThisTurn && !c.AttackedThisTurn {
+				roadCandidates = append(roadCandidates, c)
+			}
+		}
+		if len(roadCandidates) > 0 {
+			sort.Slice(roadCandidates, func(i, j int) bool {
+				return roadCandidates[i].AttackPower(g.Rules.VitalityMode) > roadCandidates[j].AttackPower(g.Rules.VitalityMode)
+			})
+			for _, best := range roadCandidates {
+				if diff != AIDifficultyHard || best.Definition.ID != "mago_de_las_tormentas" || best.CurrentVitality >= 6 {
+					if err := g.MoveCitizen(ai.ID, best.InstanceID, ZoneCombat); err == nil {
+						return true
+					}
+				}
+			}
 		}
 	}
-	if len(roadCandidates) > 0 && human.TotalCitizensOnBoard() > 0 {
-		sort.Slice(roadCandidates, func(i, j int) bool {
-			return roadCandidates[i].AttackPower(g.Rules.VitalityMode) > roadCandidates[j].AttackPower(g.Rules.VitalityMode)
-		})
-		for _, best := range roadCandidates {
-			// Hard AI keeps fragile value engines (like Mago de las Tormentas 4V) out of Combat if there are other units
-			if diff != AIDifficultyHard || best.Definition.ID != "mago_de_las_tormentas" || best.CurrentVitality >= 6 {
-				if err := g.MoveCitizen(ai.ID, best.InstanceID, ZoneCombat); err == nil {
+
+	// Move Citizens from City -> Road so they can reach Combat
+	if len(ai.Board[ZoneRoad]) < maxZone {
+		var cityCandidates []*CardInstance
+		for _, c := range ai.Board[ZoneCity] {
+			if c.Definition.Type == CardTypeCitizen && !c.PlayedThisTurn && !c.MovedThisTurn && !c.AttackedThisTurn {
+				cityCandidates = append(cityCandidates, c)
+			}
+		}
+		if len(cityCandidates) > 0 {
+			sort.Slice(cityCandidates, func(i, j int) bool {
+				return cityCandidates[i].AttackPower(g.Rules.VitalityMode) > cityCandidates[j].AttackPower(g.Rules.VitalityMode)
+			})
+			for _, cand := range cityCandidates {
+				if diff == AIDifficultyHard && (cand.Definition.ID == "mago_de_las_tormentas" || cand.Definition.ID == "reclutador" || cand.Definition.ID == "granjero" || cand.Definition.ID == "lanzador_de_escombros") && len(cityCandidates) > 1 {
+					continue
+				}
+				if err := g.MoveCitizen(ai.ID, cand.InstanceID, ZoneRoad); err == nil {
 					return true
 				}
 			}
 		}
 	}
 
-	// Otherwise move a strong Citizen from City -> Road so it can reach Combat next turn
-	var cityCandidates []*CardInstance
-	for _, c := range ai.Board[ZoneCity] {
-		if !c.PlayedThisTurn && !c.MovedThisTurn {
-			cityCandidates = append(cityCandidates, c)
-		}
-	}
-	if len(cityCandidates) > 0 {
-		sort.Slice(cityCandidates, func(i, j int) bool {
-			return cityCandidates[i].AttackPower(g.Rules.VitalityMode) > cityCandidates[j].AttackPower(g.Rules.VitalityMode)
-		})
-		for _, cand := range cityCandidates {
-			if diff == AIDifficultyHard && (cand.Definition.ID == "mago_de_las_tormentas" || cand.Definition.ID == "reclutador") && len(cityCandidates) > 1 {
-				continue
-			}
-			if err := g.MoveCitizen(ai.ID, cand.InstanceID, ZoneRoad); err == nil {
-				return true
-			}
-		}
-	}
-
+	_ = human
 	return false
 }
 
 func (g *GameState) tryAIAttack(ai, human *PlayerState, diff AIDifficulty) bool {
-	validTargetIDs := g.ValidCombatTargetIDs(ai.ID)
-	if len(validTargetIDs) == 0 {
-		return false
-	}
-
 	var readyAttackers []*CardInstance
 	for _, c := range ai.Board[ZoneCombat] {
-		if c.Definition.Type == CardTypeCitizen && !c.AttackedThisTurn {
+		if c.Definition.Type == CardTypeCitizen && !c.AttackedThisTurn && !c.MovedThisTurn {
 			readyAttackers = append(readyAttackers, c)
 		}
 	}
@@ -208,66 +233,75 @@ func (g *GameState) tryAIAttack(ai, human *PlayerState, diff AIDifficulty) bool 
 		return false
 	}
 
-	attacker := readyAttackers[0]
-	atkPower := attacker.AttackPower(g.Rules.VitalityMode)
-
-	// Easy AI picks a random valid target
-	if diff == AIDifficultyEasy {
-		targetID := validTargetIDs[rand.Intn(len(validTargetIDs))]
-		return g.AttackCitizen(ai.ID, attacker.InstanceID, targetID) == nil
-	}
-
-	// Medium & Hard AI: Score each target, taking RetaliationDamage into account if enabled.
-	var bestTarget *CardInstance
-	bestScore := -9999
-
-	for _, tid := range validTargetIDs {
-		def, _, _ := g.findBoardCard(human, tid)
-		if def == nil {
+	for _, attacker := range readyAttackers {
+		validTargetIDs := g.ValidCombatTargetIDsForAttacker(ai.ID, attacker.Definition.HasReach)
+		if len(validTargetIDs) == 0 {
 			continue
 		}
-		score := def.CurrentVitality * 10
-		killsDefender := def.CurrentVitality <= atkPower
-		if killsDefender {
-			score += 100
+
+		atkPower := attacker.AttackPower(g.Rules.VitalityMode)
+
+		if diff == AIDifficultyEasy {
+			targetID := validTargetIDs[g.randIntn(len(validTargetIDs))]
+			if g.AttackCitizen(ai.ID, attacker.InstanceID, targetID) == nil {
+				return true
+			}
+			continue
 		}
 
-		if g.Rules.RetaliationDamage {
-			defCounter := def.AttackPower(g.Rules.VitalityMode)
-			attackerDies := attacker.CurrentVitality <= defCounter
-			if attackerDies {
-				if killsDefender && def.CurrentVitality >= attacker.CurrentVitality {
-					// Favorable or even 1-for-1 trade
-					score += 20
+		var bestTarget *CardInstance
+		bestScore := -9999
+
+		for _, tid := range validTargetIDs {
+			def, _, _ := g.findBoardCard(human, tid)
+			if def == nil {
+				continue
+			}
+			score := def.CurrentVitality * 10
+			killsDefender := !def.ShieldActive && def.CurrentVitality <= atkPower
+			if killsDefender {
+				score += 100
+			} else if def.ShieldActive {
+				score += 25 // Breaking a shield is useful, especially with low-V attackers
+			}
+
+			if g.Rules.RetaliationDamage && !attacker.Definition.HasQuickAttack {
+				defCounter := def.AttackPower(g.Rules.VitalityMode)
+				attackerDies := !attacker.ShieldActive && attacker.CurrentVitality <= defCounter
+				if attackerDies {
+					if killsDefender && def.CurrentVitality >= attacker.CurrentVitality {
+						score += 20
+					} else {
+						score -= 80
+					}
 				} else {
-					// Attacker dies without killing a higher/equal value unit
-					score -= 80
+					score += 45
 				}
 			} else {
-				// Attacker survives the counter-attack!
-				score += 45
+				score += 60 // Free attack (QuickAttack or no retaliation)
+			}
+
+			if score > bestScore {
+				bestScore = score
+				bestTarget = def
 			}
 		}
 
-		if score > bestScore {
-			bestScore = score
-			bestTarget = def
+		if bestTarget == nil {
+			continue
+		}
+		if diff == AIDifficultyHard && g.Rules.RetaliationDamage && !attacker.Definition.HasQuickAttack && bestScore < 0 && len(readyAttackers) == 1 {
+			continue
+		}
+		if g.AttackCitizen(ai.ID, attacker.InstanceID, bestTarget.InstanceID) == nil {
+			return true
 		}
 	}
 
-	if bestTarget == nil {
-		return false
-	}
-	// On Hard difficulty with RetaliationDamage, avoid pointless suicide attacks (score < 0) unless we have multiple attackers
-	if diff == AIDifficultyHard && g.Rules.RetaliationDamage && bestScore < 0 && len(readyAttackers) == 1 {
-		return false
-	}
-
-	return g.AttackCitizen(ai.ID, attacker.InstanceID, bestTarget.InstanceID) == nil
+	return false
 }
 
 func (g *GameState) tryAIPlayCard(ai, human *PlayerState, diff AIDifficulty) bool {
-	// Score each playable card in hand
 	type scoredPlay struct {
 		card  *CardInstance
 		zone  ZoneID
@@ -275,6 +309,7 @@ func (g *GameState) tryAIPlayCard(ai, human *PlayerState, diff AIDifficulty) boo
 	}
 
 	canCombat := g.CanPlayInCombat(ai.ID)
+	maxZone := g.maxUnitsPerZone()
 	var options []scoredPlay
 
 	candidates := append([]*CardInstance{}, ai.Hand...)
@@ -286,7 +321,27 @@ func (g *GameState) tryAIPlayCard(ai, human *PlayerState, diff AIDifficulty) boo
 
 	for _, c := range candidates {
 		if c.Definition.Type == CardTypeCitizen || c.Definition.Type == CardTypeTool {
-			// If it's Demoledor de basura (mill_or_sacrifice), only play if we have enough cards in Discard to mill
+			// Check special pre-conditions so AI doesn't waste sacrifice/discard cards
+			if c.Definition.ID == "cientifico_loco" {
+				citInDisc := 0
+				for _, dc := range ai.Discard {
+					if dc.Definition.Type == CardTypeCitizen {
+						citInDisc++
+					}
+				}
+				if citInDisc == 0 {
+					continue
+				}
+			}
+			if c.Definition.ID == "general_brazo_de_canon" || c.Definition.ID == "supersoldado_de_elite" {
+				if ai.TotalCitizensOnBoard() == 0 {
+					continue
+				}
+			}
+			if c.Definition.ID == "espidi" && len(ai.Hand) <= 2 {
+				continue
+			}
+
 			requiresMill := 0
 			for _, ab := range c.Definition.Abilities {
 				for _, st := range ab.Steps {
@@ -301,7 +356,7 @@ func (g *GameState) tryAIPlayCard(ai, human *PlayerState, diff AIDifficulty) boo
 			if requiresMill > 0 {
 				availDiscard := len(ai.Discard)
 				if c.Zone == ZoneDiscard {
-					availDiscard-- // Playing itself from discard removes 1 card from discard
+					availDiscard--
 				}
 				if availDiscard < requiresMill {
 					continue
@@ -309,11 +364,10 @@ func (g *GameState) tryAIPlayCard(ai, human *PlayerState, diff AIDifficulty) boo
 			}
 
 			if c.Definition.IsSpy {
-				// Spy (e.g. Asesino): only play if human has a high-value Citizen at index 0 of some row
 				var bestSpyZone ZoneID
 				bestVictimVal := 0
 				for _, z := range []ZoneID{ZoneCombat, ZoneRoad, ZoneCity} {
-					if len(human.Board[z]) > 0 {
+					if len(human.Board[z]) > 0 && len(human.Board[z]) < maxZone {
 						victim := human.Board[z][0]
 						if victim.CurrentVitality > bestVictimVal {
 							bestVictimVal = victim.CurrentVitality
@@ -328,39 +382,62 @@ func (g *GameState) tryAIPlayCard(ai, human *PlayerState, diff AIDifficulty) boo
 			}
 
 			score := c.Definition.Vitality * 10
+			if c.Definition.ID == "pila_de_muertos" {
+				for _, dc := range ai.Discard {
+					if dc.Definition.Type == CardTypeCitizen {
+						score += 12
+					}
+				}
+			}
 			for _, ab := range c.Definition.Abilities {
-				if ab.Trigger == TriggerOnPlay || ab.Trigger == TriggerTurnEnd || ab.Trigger == TriggerTurnStart || ab.Trigger == TriggerOnDeath || ab.Trigger == TriggerOnEventPlayed {
+				if ab.Trigger == TriggerOnPlay || ab.Trigger == TriggerTurnEnd || ab.Trigger == TriggerTurnStart || ab.Trigger == TriggerOnDeath || ab.Trigger == TriggerOnEventPlayed || ab.Trigger == TriggerOnAnyDiscard || ab.Trigger == TriggerActivatedWear {
 					score += 35
 				}
 			}
 
-			// Determine best zone based on difficulty and card role
 			targetZone := ZoneRoad
 			if c.Definition.Type == CardTypeTool {
 				targetZone = ZoneCity
 			} else if diff == AIDifficultyEasy {
 				targetZone = ZoneCity
-				if rand.Intn(100) < 40 {
+				if g.randIntn(100) < 40 {
 					targetZone = ZoneRoad
 				}
 			} else {
-				isBacklineEngine := c.Definition.ID == "reclutador" || c.Definition.ID == "granjero" || c.Definition.ID == "mago_de_las_tormentas" || c.Definition.ID == "germinador" || c.Definition.Vitality <= 4
+				isBacklineEngine := c.Definition.ID == "reclutador" || c.Definition.ID == "granjero" || c.Definition.ID == "mago_de_las_tormentas" || c.Definition.ID == "germinador" || c.Definition.ID == "lanzador_de_escombros" || c.Definition.ID == "vendedor_ambulante" || c.Definition.Vitality <= 3
 				if isBacklineEngine {
 					targetZone = ZoneCity
-				} else if canCombat && c.Definition.Vitality >= 6 {
+				} else if canCombat && (c.Definition.Vitality >= 5 || c.Definition.HasQuickAttack) {
 					targetZone = ZoneCombat
-					score += 20 // Immediate combat presence & can attack this turn!
+					score += 20
 				} else {
 					targetZone = ZoneRoad
 				}
 			}
 
+			// Fallback if preferred zone is full (max 5 units per zone)
+			if len(ai.Board[targetZone]) >= maxZone {
+				foundZone := ZoneID("")
+				for _, fz := range []ZoneID{ZoneRoad, ZoneCity, ZoneCombat} {
+					if fz == ZoneCombat && !canCombat {
+						continue
+					}
+					if len(ai.Board[fz]) < maxZone {
+						foundZone = fz
+						break
+					}
+				}
+				if foundZone == "" {
+					continue
+				}
+				targetZone = foundZone
+			}
+
 			options = append(options, scoredPlay{card: c, zone: targetZone, score: score})
 		} else {
-			// Event card: evaluate if it is beneficial right now
 			score := g.evaluateAIEventScore(ai, human, c, diff)
 			if score > 0 {
-				options = append(options, scoredPlay{card: c, zone: "", score: score})
+				options = append(options, scoredPlay{card: c, zone: ZoneCombat, score: score})
 			}
 		}
 	}
@@ -388,32 +465,43 @@ func (g *GameState) evaluateAIEventScore(ai, human *PlayerState, eventCard *Card
 			return -1
 		}
 		return 85
-	case "el_regreso_del_sobreviviente":
-		hasCitizenInDiscard := false
-		for _, c := range ai.Discard {
-			if c.Definition.Type == CardTypeCitizen {
-				hasCitizenInDiscard = true
-				break
-			}
-		}
-		if !hasCitizenInDiscard {
+	case "lluvia_acida":
+		if human.TotalCitizensOnBoard() <= ai.TotalCitizensOnBoard() && human.TotalCitizensOnBoard() < 2 {
 			return -1
 		}
 		return 75
+	case "la_noche_de_los_muertos_vivos":
+		if ai.AlliedDeathsThisTurn <= 0 {
+			return -1
+		}
+		return 60 + ai.AlliedDeathsThisTurn*25
+	case "extension_artificial_de_vida":
+		for _, c := range ai.Discard {
+			if c.Definition.Type == CardTypeCitizen && c.Definition.Vitality >= 4 {
+				return 80
+			}
+		}
+		return -1
+	case "el_regreso_del_sobreviviente", "busqueda_del_tesoro":
+		for _, c := range ai.Discard {
+			if c.Definition.Type == CardTypeCitizen || (eventCard.Definition.ID == "busqueda_del_tesoro" && c.Definition.Type == CardTypeTool) {
+				return 75
+			}
+		}
+		return -1
 	case "mision_de_investigacion":
 		if len(ai.Deck) == 0 {
 			return -1
 		}
 		return 70
-	case "pacto_de_sacrificio":
+	case "pacto_de_sacrificio", "municiones_vivas":
 		if ai.TotalCitizensOnBoard() == 0 || human.TotalCitizensOnBoard() == 0 {
 			return -1
 		}
-		// Only worth playing if human has a strong citizen (>= 6V) and AI has a cheap citizen (<= 2V, like a Recluta)
 		minFriendly := 999
 		for _, z := range []ZoneID{ZoneCity, ZoneRoad, ZoneCombat} {
 			for _, c := range ai.Board[z] {
-				if c.CurrentVitality < minFriendly {
+				if c.Definition.Type == CardTypeCitizen && c.CurrentVitality < minFriendly {
 					minFriendly = c.CurrentVitality
 				}
 			}
@@ -421,7 +509,7 @@ func (g *GameState) evaluateAIEventScore(ai, human *PlayerState, eventCard *Card
 		maxEnemy := 0
 		for _, z := range []ZoneID{ZoneCity, ZoneRoad, ZoneCombat} {
 			for _, c := range human.Board[z] {
-				if c.CurrentVitality > maxEnemy {
+				if c.Definition.Type == CardTypeCitizen && c.CurrentVitality > maxEnemy {
 					maxEnemy = c.CurrentVitality
 				}
 			}
@@ -430,26 +518,26 @@ func (g *GameState) evaluateAIEventScore(ai, human *PlayerState, eventCard *Card
 			return 90
 		}
 		return -1
-	case "dado_de_baja":
-		// Only bounce a friendly citizen if it is heavily damaged (e.g. CurrentVitality <= BaseVitality - 4)
+	case "dado_de_baja", "retirada":
 		for _, z := range []ZoneID{ZoneCity, ZoneRoad, ZoneCombat} {
 			for _, c := range ai.Board[z] {
-				if c.BaseVitality-c.CurrentVitality >= 4 {
+				if c.Definition.Type == CardTypeCitizen && c.BaseVitality-c.CurrentVitality >= 4 {
 					return 65
 				}
 			}
 		}
 		return -1
 	default:
-		// Custom event card: check if it has valid targets
 		for _, ab := range eventCard.Definition.Abilities {
-			for _, step := range ab.Steps {
+			for stepIdx, step := range ab.Steps {
 				if step.Target.Requirement == TargetReqSingleCard {
+					if stepIdx > 0 && step.Op == EffectDiscard {
+						continue
+					}
 					cands := g.findCandidateTargets(ai.ID, eventCard.InstanceID, step.Target)
 					if len(cands) == 0 {
 						return -1
 					}
-					// Avoid playing harmful effects if only friendly targets exist
 					if (step.Op == EffectDealDamage || step.Op == EffectDestroy) && step.Target.Owner == TargetOwnerAny && human.TotalCitizensOnBoard() == 0 {
 						return -1
 					}
@@ -465,7 +553,7 @@ func (g *GameState) chooseAIPromptTarget(ai, human *PlayerState, prompt *Pending
 		return ""
 	}
 	if diff == AIDifficultyEasy {
-		return prompt.ValidTargetIDs[rand.Intn(len(prompt.ValidTargetIDs))]
+		return prompt.ValidTargetIDs[g.randIntn(len(prompt.ValidTargetIDs))]
 	}
 
 	step := prompt.QueuedStep.Step
@@ -480,11 +568,14 @@ func (g *GameState) chooseAIPromptTarget(ai, human *PlayerState, prompt *Pending
 			}
 		}
 		if len(enemyTargets) > 0 {
-			// If damage, prefer an enemy that dies to step.Amount; otherwise highest CurrentVitality
+			dmg := step.Amount
+			if step.UseStoredVitality {
+				dmg = g.lastStoredVitality
+			}
 			if step.Op == EffectDealDamage {
 				var bestKill *CardInstance
 				for _, et := range enemyTargets {
-					if et.CurrentVitality <= step.Amount {
+					if !et.ShieldActive && et.CurrentVitality <= dmg {
 						if bestKill == nil || et.CurrentVitality > bestKill.CurrentVitality {
 							bestKill = et
 						}
@@ -501,7 +592,8 @@ func (g *GameState) chooseAIPromptTarget(ai, human *PlayerState, prompt *Pending
 		}
 	}
 
-	// 2. If sacrificing a friendly citizen (EffectDestroy with Owner == Self): pick lowest CurrentVitality (e.g. 1V Recluta)
+	// 2. If sacrificing a friendly citizen (EffectDestroy with Owner == Self):
+	// Prefer Sujeto de prueba / Cadetes Trillizos (deathwish) or lowest CurrentVitality
 	if step.Op == EffectDestroy && step.Target.Owner == TargetOwnerSelf {
 		var friendly []*CardInstance
 		for _, id := range prompt.ValidTargetIDs {
@@ -517,7 +609,7 @@ func (g *GameState) chooseAIPromptTarget(ai, human *PlayerState, prompt *Pending
 		}
 	}
 
-	// 3. If discarding a card from hand (EffectDiscard): prefer a card with TriggerOnDiscard (e.g. Nadador de basura) or lowest Vitality
+	// 3. If discarding a card from hand (EffectDiscard): prefer a card with TriggerOnDiscard (Nadador de basura / Trampa defectuosa) or lowest Vitality
 	if step.Op == EffectDiscard {
 		var lowest *CardInstance
 		for _, id := range prompt.ValidTargetIDs {
@@ -539,8 +631,8 @@ func (g *GameState) chooseAIPromptTarget(ai, human *PlayerState, prompt *Pending
 		}
 	}
 
-	// 4. If searching Deck or returning from Discard to Hand: pick highest Vitality Citizen
-	if step.Op == EffectMoveZone && step.DestZone == ZoneHand {
+	// 4. If searching Deck or returning from Discard to Hand or exiling from Discard for Abominación/Zombie: pick highest Vitality
+	if step.Op == EffectMoveZone {
 		var best *CardInstance
 		for _, id := range prompt.ValidTargetIDs {
 			c := g.findCardAnywhere(id)
@@ -556,5 +648,6 @@ func (g *GameState) chooseAIPromptTarget(ai, human *PlayerState, prompt *Pending
 		}
 	}
 
+	_ = human
 	return prompt.ValidTargetIDs[0]
 }

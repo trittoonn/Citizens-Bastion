@@ -1,5 +1,7 @@
 package game
 
+import "math/rand"
+
 // GamePhase represents the explicit phase of a match and turn.
 type GamePhase string
 
@@ -15,16 +17,18 @@ const (
 
 // CardInstance is an individual in-game instance of a CardDefinition.
 type CardInstance struct {
-	InstanceID       string         `json:"instanceId"`
-	OwnerID          string         `json:"ownerId"`
-	Definition       CardDefinition `json:"definition"`
-	BaseVitality     int            `json:"baseVitality"`
-	CurrentVitality  int            `json:"currentVitality"`
-	Zone             ZoneID         `json:"zone"`
-	PlayedThisTurn   bool           `json:"playedThisTurn"`
-	MovedThisTurn    bool           `json:"movedThisTurn"`
-	AttackedThisTurn bool           `json:"attackedThisTurn"`
-	ShieldActive     bool           `json:"shieldActive"`
+	InstanceID          string         `json:"instanceId"`
+	OwnerID             string         `json:"ownerId"`
+	Definition          CardDefinition `json:"definition"`
+	BaseVitality        int            `json:"baseVitality"`
+	CurrentVitality     int            `json:"currentVitality"`
+	Zone                ZoneID         `json:"zone"`
+	PlayedThisTurn      bool           `json:"playedThisTurn"`
+	MovedThisTurn       bool           `json:"movedThisTurn"`
+	AttackedThisTurn    bool           `json:"attackedThisTurn"`
+	UsedAbilityThisTurn bool           `json:"usedAbilityThisTurn,omitempty"`
+	SacrificeAtTurnEnd  bool           `json:"sacrificeAtTurnEnd,omitempty"`
+	ShieldActive        bool           `json:"shieldActive"`
 }
 
 // AttackPower returns the damage this Citizen deals when attacking under the given VitalityMode.
@@ -49,15 +53,17 @@ func (c *CardInstance) Clone() CardInstance {
 
 // PlayerState holds all zones and counters for one player.
 type PlayerState struct {
-	ID                string                     `json:"id"`
-	Name              string                     `json:"name"`
-	DevelopmentPoints int                        `json:"developmentPoints"`
-	MulliganDone      bool                       `json:"mulliganDone"`
-	Deck              []*CardInstance            `json:"deck"`
-	Hand              []*CardInstance            `json:"hand"`
-	Discard           []*CardInstance            `json:"discard"`
-	Exile             []*CardInstance            `json:"exile"`
-	Board             map[ZoneID][]*CardInstance `json:"board"`
+	ID                       string                     `json:"id"`
+	Name                     string                     `json:"name"`
+	DevelopmentPoints        int                        `json:"developmentPoints"`
+	MulliganDone             bool                       `json:"mulliganDone"`
+	AlliedDeathsThisTurn     int                        `json:"alliedDeathsThisTurn,omitempty"`
+	CardsLeftDiscardThisTurn int                        `json:"cardsLeftDiscardThisTurn,omitempty"`
+	Deck                     []*CardInstance            `json:"deck"`
+	Hand                     []*CardInstance            `json:"hand"`
+	Discard                  []*CardInstance            `json:"discard"`
+	Exile                    []*CardInstance            `json:"exile"`
+	Board                    map[ZoneID][]*CardInstance `json:"board"`
 }
 
 // TotalCitizensOnBoard returns the count of Citizens across City, Road, and Combat zones.
@@ -75,11 +81,13 @@ func (p *PlayerState) TotalCitizensOnBoard() int {
 
 // QueuedEffect is an atomic effect step waiting in the resolution queue.
 type QueuedEffect struct {
-	ControllerID   string     `json:"controllerId"`
-	SourceCardID   string     `json:"sourceCardId"`
-	SourceCardName string     `json:"sourceCardName"`
-	SourceZone     ZoneID     `json:"sourceZone"`
-	Step           EffectStep `json:"step"`
+	ControllerID      string     `json:"controllerId"`
+	SourceCardID      string     `json:"sourceCardId"`
+	SourceCardDefID   string     `json:"sourceCardDefId"`
+	SourceCardName    string     `json:"sourceCardName"`
+	SourceZone        ZoneID     `json:"sourceZone"`
+	Step              EffectStep `json:"step"`
+	DestroySourceCard bool       `json:"destroySourceCard,omitempty"`
 }
 
 // PendingPrompt describes an interactive choice required from a player.
@@ -157,27 +165,61 @@ type ActionStepSnapshot struct {
 	IsYourTurn     bool                 `json:"isYourTurn"`
 }
 
+// MatchTelemetry collects per-match statistics for AI vs AI simulations.
+type MatchTelemetry struct {
+	FirstPlayerIdx    int
+	CardsPlayedBySlot [2]int
+	TotalDamageBySlot [2]int
+	PlaysByCard       map[string]int
+	DamageByCard      map[string]int
+	KillsByCard       map[string]int
+	CardNames         map[string]string
+	CardTypes         map[string]CardType
+	PlayedByWinner    map[string]bool
+	PlayedInMatch     map[string]bool
+}
+
+// NewMatchTelemetry initializes an empty MatchTelemetry tracker.
+func NewMatchTelemetry() *MatchTelemetry {
+	return &MatchTelemetry{
+		FirstPlayerIdx: -1,
+		PlaysByCard:    make(map[string]int),
+		DamageByCard:   make(map[string]int),
+		KillsByCard:    make(map[string]int),
+		CardNames:      make(map[string]string),
+		CardTypes:      make(map[string]CardType),
+		PlayedByWinner: make(map[string]bool),
+		PlayedInMatch:  make(map[string]bool),
+	}
+}
+
 // GameState is the authoritative state of a match.
 type GameState struct {
-	ID              string          `json:"id"`
-	GameName        string          `json:"gameName"`
-	Rules           GameRulesConfig `json:"rules"`
-	Phase           GamePhase       `json:"phase"`
-	ResumePhase     GamePhase       `json:"resumePhase"` // Phase to resume after PhaseAwaitingInput finishes
-	TurnNumber      int             `json:"turnNumber"`
-	ActivePlayerIdx int             `json:"activePlayerIdx"`
-	PlaysRemaining  int             `json:"playsRemaining"`
-	MovesRemaining  int             `json:"movesRemaining"`
-	Players         [2]*PlayerState `json:"players"`
-	EffectQueue     []QueuedEffect  `json:"-"`
-	PendingPrompt   *PendingPrompt  `json:"pendingPrompt,omitempty"`
-	WinnerID        string          `json:"winnerId,omitempty"`
-	WinReason       string          `json:"winReason,omitempty"`
-	Log             []LogEntry      `json:"log"`
-	StateVersion    int64           `json:"stateVersion"`
-	nextInstanceSeq int
-	nextAnimSeq     int64
-	animSteps       []rawStepRecord
+	ID                  string          `json:"id"`
+	GameName            string          `json:"gameName"`
+	Rules               GameRulesConfig `json:"rules"`
+	Phase               GamePhase       `json:"phase"`
+	ResumePhase         GamePhase       `json:"resumePhase"` // Phase to resume after PhaseAwaitingInput finishes
+	TurnNumber          int             `json:"turnNumber"`
+	ActivePlayerIdx     int             `json:"activePlayerIdx"`
+	PlaysRemaining      int             `json:"playsRemaining"`
+	MovesRemaining      int             `json:"movesRemaining"`
+	Players             [2]*PlayerState `json:"players"`
+	EffectQueue         []QueuedEffect  `json:"-"`
+	PendingPrompt       *PendingPrompt  `json:"pendingPrompt,omitempty"`
+	WinnerID            string          `json:"winnerId,omitempty"`
+	WinReason           string          `json:"winReason,omitempty"`
+	Log                 []LogEntry      `json:"log"`
+	StateVersion        int64           `json:"stateVersion"`
+	Telemetry           *MatchTelemetry `json:"-"`
+	DisableAnimSteps    bool            `json:"-"`
+	rng                 *rand.Rand
+	lastStoredVitality  int
+	lastStoredCardType  CardType
+	lastStoredCardID    string
+	nextInstanceSeq     int
+	nextAnimSeq         int64
+	animSteps           []rawStepRecord
 }
 
 // SanitizedPlayerView is a player's state with hidden cards (Deck/Opponent Hand) masked as counts.

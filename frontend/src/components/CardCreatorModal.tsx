@@ -49,6 +49,30 @@ const ICON_OPTIONS = [
   'nadador_de_basura',
   'demoledor_de_basura',
   'trillizos',
+  'cientifico_loco',
+  'general_brazo_de_canon',
+  'lluvia_acida',
+  'supersoldado_de_elite',
+  'fuerza_antihuelga',
+  'cadetes_trillizos',
+  'pila_de_muertos',
+  'constructor_de_cementerios',
+  'municiones_vivas',
+  'extension_artificial_de_vida',
+  'sujeto_de_prueba',
+  'la_noche_de_los_muertos_vivos',
+  'cementerio_infectado',
+  'cremadora_sospechosa',
+  'espidi',
+  'guia_contratado',
+  'vendedor_ambulante',
+  'lanzador_de_escombros',
+  'camino_bifurcado',
+  'busqueda_del_tesoro',
+  'templo_antiguo',
+  'pala_neumatica',
+  'trampa_defectuosa',
+  'retirada',
   'rayo_vengativo',
   'el_regreso_del_sobreviviente',
   'mision_de_investigacion',
@@ -79,10 +103,27 @@ function createDefaultStep(op: EffectOpType): EffectStep {
         tokenDef: {
           id: 'token_recluta',
           name: 'Recluta',
-          vitality: 1,
+          vitality: 2,
           count: 1,
           artIcon: 'shield',
         },
+      };
+    case 'exile_and_summon_by_v':
+      return {
+        op: 'exile_and_summon_by_v',
+        amount: 3,
+        destZone: 'same_row',
+        tokenDef: {
+          id: 'token_abominacion',
+          name: 'Abominación',
+          vitality: 1,
+          count: 1,
+          artIcon: 'skull',
+        },
+      };
+    case 'cycle_hand':
+      return {
+        op: 'cycle_hand',
       };
     case 'deal_damage':
       return {
@@ -169,6 +210,13 @@ export const CardCreatorModal: React.FC<CardCreatorModalProps> = ({
   );
   const [isSpy, setIsSpy] = useState(() => Boolean(initialCard?.isSpy));
   const [hasShield, setHasShield] = useState(() => Boolean(initialCard?.hasShield));
+  const [isDefender, setIsDefender] = useState(() => Boolean(initialCard?.isDefender));
+  const [hasQuickAttack, setHasQuickAttack] = useState(() =>
+    Boolean(initialCard?.hasQuickAttack)
+  );
+  const [hasReach, setHasReach] = useState(() => Boolean(initialCard?.hasReach));
+  const [isCommander, setIsCommander] = useState(() => Boolean(initialCard?.isCommander));
+  const [isLocation, setIsLocation] = useState(() => Boolean(initialCard?.isLocation));
   const [playFromDiscard, setPlayFromDiscard] = useState(() =>
     Boolean(initialCard?.playFromDiscard)
   );
@@ -274,6 +322,11 @@ export const CardCreatorModal: React.FC<CardCreatorModalProps> = ({
   const autoDescription = generateCardDescription(abilities, {
     isSpy: type === 'citizen' ? isSpy : false,
     hasShield: type !== 'event' ? hasShield : false,
+    isDefender: type === 'citizen' ? isDefender : false,
+    hasQuickAttack: type === 'citizen' ? hasQuickAttack : false,
+    hasReach: type === 'citizen' ? hasReach : false,
+    isCommander: type === 'citizen' ? isCommander : false,
+    isLocation: type === 'tool' ? isLocation : false,
     playFromDiscard,
   });
   const finalDescription = customDescription.trim() || autoDescription;
@@ -287,6 +340,11 @@ export const CardCreatorModal: React.FC<CardCreatorModalProps> = ({
     abilities,
     ...(type === 'citizen' && isSpy ? { isSpy: true } : {}),
     ...(type !== 'event' && hasShield ? { hasShield: true } : {}),
+    ...(type === 'citizen' && isDefender ? { isDefender: true } : {}),
+    ...(type === 'citizen' && hasQuickAttack ? { hasQuickAttack: true } : {}),
+    ...(type === 'citizen' && hasReach ? { hasReach: true } : {}),
+    ...(type === 'citizen' && isCommander ? { isCommander: true } : {}),
+    ...(type === 'tool' && isLocation ? { isLocation: true } : {}),
     ...(playFromDiscard ? { playFromDiscard: true } : {}),
     isCustom: true,
     artColor,
@@ -412,17 +470,91 @@ export const CardCreatorModal: React.FC<CardCreatorModalProps> = ({
               </span>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
                 {type === 'citizen' && (
-                  <label className="flex items-center gap-2 p-2 rounded-lg bg-slate-900/90 border border-slate-800 cursor-pointer hover:border-purple-500/50">
+                  <>
+                    <label className="flex items-center gap-2 p-2 rounded-lg bg-slate-900/90 border border-slate-800 cursor-pointer hover:border-amber-500/50">
+                      <input
+                        type="checkbox"
+                        checked={isDefender}
+                        onChange={(e) => setIsDefender(e.target.checked)}
+                        className="accent-amber-500"
+                      />
+                      <span className="text-slate-200 font-semibold">
+                        🏰 Defensor{' '}
+                        <span className="block text-[10px] text-slate-400 font-normal">
+                          Debe ser atacado primero en su fila
+                        </span>
+                      </span>
+                    </label>
+                    <label className="flex items-center gap-2 p-2 rounded-lg bg-slate-900/90 border border-slate-800 cursor-pointer hover:border-orange-500/50">
+                      <input
+                        type="checkbox"
+                        checked={hasQuickAttack}
+                        onChange={(e) => setHasQuickAttack(e.target.checked)}
+                        className="accent-orange-500"
+                      />
+                      <span className="text-slate-200 font-semibold">
+                        ⚡ Ataque Rápido{' '}
+                        <span className="block text-[10px] text-slate-400 font-normal">
+                          No recibe daño de represalia al atacar
+                        </span>
+                      </span>
+                    </label>
+                    <label className="flex items-center gap-2 p-2 rounded-lg bg-slate-900/90 border border-slate-800 cursor-pointer hover:border-blue-500/50">
+                      <input
+                        type="checkbox"
+                        checked={hasReach}
+                        onChange={(e) => setHasReach(e.target.checked)}
+                        className="accent-blue-500"
+                      />
+                      <span className="text-slate-200 font-semibold">
+                        🏹 Rango{' '}
+                        <span className="block text-[10px] text-slate-400 font-normal">
+                          Ignora unidades en Combate al atacar
+                        </span>
+                      </span>
+                    </label>
+                    <label className="flex items-center gap-2 p-2 rounded-lg bg-slate-900/90 border border-slate-800 cursor-pointer hover:border-yellow-500/50">
+                      <input
+                        type="checkbox"
+                        checked={isCommander}
+                        onChange={(e) => setIsCommander(e.target.checked)}
+                        className="accent-yellow-500"
+                      />
+                      <span className="text-slate-200 font-semibold">
+                        👑 Comandante{' '}
+                        <span className="block text-[10px] text-slate-400 font-normal">
+                          Pasa a tu mano tras el Mulligan
+                        </span>
+                      </span>
+                    </label>
+                    <label className="flex items-center gap-2 p-2 rounded-lg bg-slate-900/90 border border-slate-800 cursor-pointer hover:border-purple-500/50">
+                      <input
+                        type="checkbox"
+                        checked={isSpy}
+                        onChange={(e) => setIsSpy(e.target.checked)}
+                        className="accent-purple-500"
+                      />
+                      <span className="text-slate-200 font-semibold">
+                        🗡️ Espía{' '}
+                        <span className="block text-[10px] text-slate-400 font-normal">
+                          Se juega del lado del oponente
+                        </span>
+                      </span>
+                    </label>
+                  </>
+                )}
+                {type === 'tool' && (
+                  <label className="flex items-center gap-2 p-2 rounded-lg bg-slate-900/90 border border-slate-800 cursor-pointer hover:border-amber-500/50">
                     <input
                       type="checkbox"
-                      checked={isSpy}
-                      onChange={(e) => setIsSpy(e.target.checked)}
-                      className="accent-purple-500"
+                      checked={isLocation}
+                      onChange={(e) => setIsLocation(e.target.checked)}
+                      className="accent-amber-500"
                     />
                     <span className="text-slate-200 font-semibold">
-                      🗡️ Espía{' '}
+                      🏛️ Locación{' '}
                       <span className="block text-[10px] text-slate-400 font-normal">
-                        Se juega del lado del oponente
+                        Estructura con Desgaste por efecto
                       </span>
                     </span>
                   </label>
@@ -552,6 +684,8 @@ export const CardCreatorModal: React.FC<CardCreatorModalProps> = ({
                             <option value="on_death">Último deseo (Al ser destruido)</option>
                             <option value="on_event_played">Cuando juegues un Evento</option>
                             <option value="on_discard">Cuando descartas esta carta</option>
+                            <option value="on_any_discard">Cuando descartes cualquier carta</option>
+                            <option value="activated_wear">Activable en turno (Desgaste X)</option>
                           </select>
                         ) : (
                           <span className="text-xs px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 font-semibold">
@@ -599,8 +733,10 @@ export const CardCreatorModal: React.FC<CardCreatorModalProps> = ({
                             >
                               <option value="deal_damage">Hacer Daño</option>
                               <option value="summon_token">Convocar Ciudadano Token</option>
+                              <option value="exile_and_summon_by_v">Triturar del Descarte y Convocar por Suma de V</option>
                               <option value="draw_cards">Levantar Cartas del Mazo</option>
                               <option value="discard_cards">Descartar Carta de tu Mano</option>
+                              <option value="cycle_hand">Reciclar Mano (Descartar todo y robar igual)</option>
                               <option value="summon_self">Convocar esta carta desde el Descarte</option>
                               <option value="mill_or_sacrifice">Triturar X del Descarte o Sacrificar esta carta</option>
                               <option value="move_zone">Mover Carta entre Zonas (Buscar/Recuperar)</option>

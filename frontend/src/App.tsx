@@ -196,28 +196,23 @@ export const App: React.FC = () => {
 
             <div className="space-y-3 font-serif text-sm text-[#e7dfd3] leading-relaxed">
               <p>
-                <strong className="font-display text-xs text-[#e3c158]">Condición de Victoria:</strong> Al final del turno de cada jugador, si tiene más Ciudadanos que el oponente, recibe 1 Punto de Desarrollo. Gana el primer jugador en llegar a 10 Puntos de Desarrollo.
+                <strong className="font-display text-xs text-[#e3c158]">Condición de Victoria:</strong> Cada dos turnos (al cerrarse una ronda completa de ambos jugadores), el jugador que tenga más Ciudadanos recibe 1 Punto de Desarrollo. En el turno siguiente empieza el jugador que va ganando en puntos. Gana el primer jugador en llegar a 5 Puntos de Desarrollo.
               </p>
               <p>
-                <strong className="font-display text-xs text-[#e3c158]">Tipos de Carta:</strong>
-                <br />• <strong>Ciudadanos:</strong> Cuentan hacia tus puntos de Desarrollo. Tienen un valor de Vitalidad (V) que representa cuánto daño hacen cuando atacan y cuánto daño pueden recibir antes de ser destruidos.
-                <br />• <strong>Eventos:</strong> Cartas con un efecto inmediato que luego van al Descarte.
+                <strong className="font-display text-xs text-[#e3c158]">Tipos de Carta y Palabras Clave:</strong>
+                <br />• <strong>Ciudadanos (V):</strong> Cuentan hacia tus puntos de Desarrollo. Su Vitalidad indica tanto su salud como su daño al atacar.
+                <br />• <strong>Herramientas y Locaciones (A):</strong> Se despliegan en tus zonas con Armadura pero no cuentan como Ciudadanos ni atacan. Las Locaciones con <em>Desgaste X</em> sufren X daño al activar su habilidad.
+                <br />• <strong>Eventos:</strong> Efecto inmediato y van al Descarte.
+                <br />• <strong>Defensor:</strong> Debe ser atacado antes que otros ciudadanos sin Defensor en su misma zona.
+                <br />• <strong>Ataque Rápido:</strong> Al atacar no recibe daño de represalia del defensor.
+                <br />• <strong>Rango:</strong> Puede atacar la Colonia enemiga ignorando unidades en la Zona de Combate.
+                <br />• <strong>Comandante:</strong> Comienza fuera del mazo y pasa a tu mano tras el Mulligan.
               </p>
               <p>
-                <strong className="font-display text-xs text-[#e3c158]">Zonas del Tablero (por jugador):</strong>
-                <br />• <em>La Ciudad</em>, <em>El Camino</em> y <em>La Zona de Combate</em>.
-                <br />• Podés jugar Ciudadanos en La Ciudad o El Camino. Solo podés jugar una carta directo en la Zona de Combate si tu oponente tiene una carta ahí.
-                <br />• Podés mover tus Ciudadanos a una zona inmediatamente adyacente (Ciudad ↔ Camino ↔ Combate) siempre que no hayan sido jugados ese mismo turno.
-              </p>
-              <p>
-                <strong className="font-display text-xs text-[#e3c158]">Combate:</strong> Cada Ciudadano en la Zona de Combate puede atacar una vez por turno a cualquier carta enemiga que no tenga otra carta en una zona de por medio (primero Zona de Combate; si está vacía, El Camino; si está vacío, La Ciudad).
-              </p>
-              <p>
-                <strong className="font-display text-xs text-[#e3c158]">Comienzo del Juego y Turnos:</strong>
-                <br />• Cada jugador levanta 4 cartas y puede hacer Mulligan (poner cualquier cantidad en el fondo del mazo, levantar la misma cantidad y mezclar).
-                <br />• Al comienzo de cada turno se levantan 2 cartas (salvo el Turno 1 del jugador inicial, que levanta 1).
-                <br />• Cada turno se pueden realizar hasta 3 jugadas (el jugador inicial en su primer turno solo puede realizar 2 jugadas).
-                <br />• Orden de activación de efectos simultáneos: de la Zona de Combate a la Ciudad y de derecha a izquierda.
+                <strong className="font-display text-xs text-[#e3c158]">Zonas y Límites:</strong>
+                <br />• <em>La Ciudad</em>, <em>El Camino</em> y <em>La Zona de Combate</em> (máximo 5 cartas por zona y máximo 10 cartas en mano).
+                <br />• Podés jugar Ciudadanos en La Ciudad o El Camino (y en Combate solo si tu oponente tiene una carta ahí).
+                <br />• Cada Ciudadano puede moverse a una zona adyacente <strong>o</strong> atacar en su turno (no ambas en el mismo turno, y no puede moverse el turno que entra en juego).
               </p>
             </div>
           </div>

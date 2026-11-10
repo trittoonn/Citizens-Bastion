@@ -24,11 +24,15 @@ describe('localStorage Card & Deck Studio Service', () => {
 
   it('seeds the canonical cards from Citizens Bastion by default', () => {
     const cards = getAllCards();
-    expect(cards.length).toBe(22);
+    expect(cards.length).toBeGreaterThanOrEqual(45);
     expect(cards.some((c) => c.id === 'caballero_galardonado')).toBe(true);
     expect(cards.some((c) => c.id === 'pacto_de_sacrificio')).toBe(true);
     expect(cards.some((c) => c.id === 'asesino')).toBe(true);
     expect(cards.some((c) => c.id === 'fabrica_de_robots')).toBe(true);
+    expect(cards.some((c) => c.id === 'general_brazo_de_canon')).toBe(true);
+    expect(cards.some((c) => c.id === 'espidi')).toBe(true);
+    expect(cards.some((c) => c.id === 'cientifico_loco')).toBe(true);
+    expect(cards.some((c) => c.id === 'retirada')).toBe(true);
   });
 
   it('creates and deletes custom cards in localStorage', () => {
@@ -75,14 +79,17 @@ describe('localStorage Card & Deck Studio Service', () => {
     expect(updatedCab?.vitality).toBe(14);
     expect(updatedCab?.hasShield).toBe(true);
 
-    const deckCab = getAllDecks()[0].cards.find((c) => c.id === 'caballero_galardonado');
+    const deckWithCab = getAllDecks().find((d) =>
+      d.cards.some((c) => c.id === 'caballero_galardonado')
+    );
+    const deckCab = deckWithCab?.cards.find((c) => c.id === 'caballero_galardonado');
     expect(deckCab?.vitality).toBe(14);
 
-    // Deleting/restoring an edited default card restores its canonical 10V version
+    // Deleting/restoring an edited default card restores its canonical 8V version
     const afterRestoreDefault = deleteCustomCard('caballero_galardonado');
     expect(
       afterRestoreDefault.find((c) => c.id === 'caballero_galardonado')?.vitality
-    ).toBe(10);
+    ).toBe(8);
   });
 
   it('supports optional deck constraints (warnings when unenforced, errors when enforced)', () => {

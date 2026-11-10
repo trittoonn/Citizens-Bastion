@@ -351,7 +351,7 @@
 }
 
 /* ============================================================================
-   PRINT / PDF EXPORT STYLES (@media print — 3x3 TCG Cards per A4 Sheet)
+   PRINT / PDF EXPORT STYLES (@media print — Configurable TCG Cards per A4 Sheet)
    ============================================================================ */
 @media print {
   @page {
@@ -360,10 +360,11 @@
   }
 
   html,
-  body,
-  #root {
+  body {
     background: #ffffff !important;
+    background-image: none !important;
     color: #000000 !important;
+    width: 210mm !important;
     height: auto !important;
     min-height: 0 !important;
     overflow: visible !important;
@@ -373,6 +374,12 @@
     print-color-adjust: exact !important;
   }
 
+  /* Completely hide the dark #root app shell when the portaled print modal is open,
+     eliminating the all-black first page and the dark right margin */
+  body.printing-deck #root {
+    display: none !important;
+  }
+
   .no-print {
     display: none !important;
   }
@@ -380,25 +387,35 @@
   .deck-print-modal-backdrop {
     position: static !important;
     inset: auto !important;
+    width: 210mm !important;
     background: #ffffff !important;
+    background-image: none !important;
     backdrop-filter: none !important;
     overflow: visible !important;
     display: block !important;
+    margin: 0 !important;
+    padding: 0 !important;
   }
 
   .deck-print-sheets-container {
+    width: 210mm !important;
     overflow: visible !important;
     padding: 0 !important;
     margin: 0 !important;
     display: block !important;
+    background: #ffffff !important;
   }
 
   .deck-print-page {
     box-shadow: none !important;
     border-radius: 0 !important;
-    margin: 0 auto !important;
+    margin: 0 !important;
+    padding: 7mm !important;
     width: 210mm !important;
-    height: 297mm !important;
+    min-height: 0 !important;
+    height: auto !important;
+    box-sizing: border-box !important;
+    background: #ffffff !important;
     page-break-after: always !important;
     break-after: page !important;
     page-break-inside: avoid !important;

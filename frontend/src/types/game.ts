@@ -17,7 +17,9 @@ export type TriggerType =
   | 'immediate'
   | 'on_death'
   | 'on_event_played'
-  | 'on_discard';
+  | 'on_discard'
+  | 'on_any_discard'
+  | 'activated_wear';
 
 export type EffectOpType =
   | 'summon_token'
@@ -28,14 +30,17 @@ export type EffectOpType =
   | 'modify_stat'
   | 'discard_cards'
   | 'summon_self'
-  | 'mill_or_sacrifice';
+  | 'mill_or_sacrifice'
+  | 'exile_and_summon_by_v'
+  | 'cycle_hand';
 
 export type TargetRequirement =
   | 'none'
   | 'single_card'
   | 'all_matching'
   | 'self_card'
-  | 'right_neighbor';
+  | 'right_neighbor'
+  | 'weakest_enemy';
 
 export type TargetOwner = 'self' | 'enemy' | 'any';
 
@@ -44,6 +49,10 @@ export interface TargetRule {
   owner?: TargetOwner;
   zones?: ZoneID[];
   cardType?: CardType | '';
+  excludeCardType?: CardType | '';
+  onlyLocations?: boolean;
+  excludeSourceCard?: boolean;
+  matchStoredCardType?: boolean;
   prompt?: string;
 }
 
@@ -56,6 +65,9 @@ export interface TokenTemplate {
   artIcon?: string;
   description?: string;
   hasShield?: boolean;
+  isDefender?: boolean;
+  hasQuickAttack?: boolean;
+  hasReach?: boolean;
   abilities?: Ability[];
 }
 
@@ -66,10 +78,21 @@ export interface EffectStep {
   destZone?: ZoneID;
   shuffleDeck?: boolean;
   tokenDef?: TokenTemplate;
+  storeVictimVitality?: boolean;
+  useStoredVitality?: boolean;
+  storeTargetCardType?: boolean;
+  grantSelfShieldOnSuccess?: boolean;
+  scaleByDiscardCitizens?: boolean;
+  scaleCountByAlliedDeathsThisTurn?: boolean;
+  sacrificeAtTurnEnd?: boolean;
 }
 
 export interface Ability {
   trigger: TriggerType;
+  wearCost?: number;
+  oncePerTurn?: boolean;
+  conditionAlliedDiedThisTurn?: boolean;
+  conditionCardLeftDiscardThisTurn?: boolean;
   steps: EffectStep[];
 }
 
@@ -82,6 +105,12 @@ export interface CardDefinition {
   abilities?: Ability[];
   isSpy?: boolean;
   hasShield?: boolean;
+  isDefender?: boolean;
+  hasQuickAttack?: boolean;
+  hasReach?: boolean;
+  isCommander?: boolean;
+  isLocation?: boolean;
+  planet?: string;
   playFromDiscard?: boolean;
   isToken?: boolean;
   isCustom?: boolean;
@@ -117,6 +146,9 @@ export interface GameRulesConfig {
   retaliationDamage: boolean;
   startingPlayer?: StartingPlayerMode;
   pointsToWin: number;
+  pointsEveryTwoTurns?: boolean;
+  maxUnitsPerZone?: number;
+  maxHandSize?: number;
   initialHandSize: number;
   drawPerTurn: number;
   firstTurnDraw: number;
@@ -145,6 +177,8 @@ export interface CardInstance {
   playedThisTurn: boolean;
   movedThisTurn?: boolean;
   attackedThisTurn: boolean;
+  usedAbilityThisTurn?: boolean;
+  sacrificeAtTurnEnd?: boolean;
   shieldActive?: boolean;
 }
 
@@ -260,6 +294,7 @@ export type ActionType =
   | 'PLAY_CARD'
   | 'MOVE_CITIZEN'
   | 'ATTACK'
+  | 'ACTIVATE_ABILITY'
   | 'SELECT_TARGET'
   | 'END_TURN';
 
@@ -272,4 +307,74 @@ export interface ActionRequest {
   attackerId?: string;
   defenderId?: string;
   targetCardId?: string;
+}
+
+// ============================================================================
+// AI vs AI Parallel Simulation Types
+// ============================================================================
+
+export type SimStartingMode = 'alternate' | 'random' | 'deckA' | 'deckB';
+
+export interface SimulationRequest {
+  deckAName: string;
+  deckACards: CardDefinition[];
+  deckBName: string;
+  deckBCards: CardDefinition[];
+  numGames: number;
+  difficulty: Exclude<AIDifficulty, ''>;
+  startingMode: SimStartingMode;
+  rules: GameRulesConfig;
+}
+
+export interface StatSummary {
+  total: number;
+  average: number;
+  min: number;
+  max: number;
+}
+
+export interface DeckSimulationMetrics {
+  deckName: string;
+  wins: number;
+  winRate: number;
+  winsGoingFirst: number;
+  winsGoingSecond: number;
+  damageDealt: StatSummary;
+  cardsPlayed: StatSummary;
+  cardsInHandAtEnd: StatSummary;
+  developmentPoints: StatSummary;
+  citizensAtEnd: StatSummary;
+}
+
+export interface CardSimulationMetrics {
+  cardId: string;
+  cardName: string;
+  cardType: CardType;
+  timesPlayed: number;
+  avgPlaysPerGame: number;
+  gamesPlayedIn: number;
+  winsWhenPlayed: number;
+  winRateWhenPlayed: number;
+  damagePerGame: StatSummary;
+  avgDamagePerPlay: number;
+  totalKills: number;
+}
+
+export interface SimulationReport {
+  totalGames: number;
+  durationMs: number;
+  difficulty: AIDifficulty;
+  startingMode: SimStartingMode;
+  deckA: DeckSimulationMetrics;
+  deckB: DeckSimulationMetrics;
+  draws: number;
+  firstPlayerWins: number;
+  firstPlayerWinRate: number;
+  secondPlayerWins: number;
+  secondPlayerWinRate: number;
+  turnsPerGame: StatSummary;
+  mostUsedCard?: CardSimulationMetrics;
+  leastUsedCard?: CardSimulationMetrics;
+  topDamageCard?: CardSimulationMetrics;
+  cardMetrics: CardSimulationMetrics[];
 }

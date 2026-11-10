@@ -109,10 +109,15 @@ export const CardView: React.FC<CardViewProps> = ({
   const isBuffed = Boolean(instance && currentV > baseV);
   const shieldActive = instance ? Boolean(instance.shieldActive) : Boolean(card.hasShield);
   const readyToAttack = Boolean(
-    isCitizen && canAttack && instance && !instance.attackedThisTurn
+    isCitizen && canAttack && instance && !instance.attackedThisTurn && !instance.movedThisTurn
   );
   const readyToMove = Boolean(
-    isCitizen && canMove && instance && !instance.playedThisTurn && !instance.movedThisTurn
+    isCitizen &&
+      canMove &&
+      instance &&
+      !instance.playedThisTurn &&
+      !instance.movedThisTurn &&
+      !instance.attackedThisTurn
   );
 
   // High-contrast metallic bevel frames so cards pop sharply off the dark board
@@ -299,6 +304,32 @@ export const CardView: React.FC<CardViewProps> = ({
               </div>
             )}
 
+            {/* Defender / Quick Attack / Reach Mini Indicators on Board */}
+            {card.isDefender && (
+              <div
+                title="Defensor (los enemigos deben atacar a este ciudadano antes que a otros en su zona)"
+                className="-ml-0.5 px-1 py-0.2 rounded bg-[#78350f] border border-[#f59e0b] text-[7.5px] font-display font-bold text-[#fef3c7] shadow-md"
+              >
+                🏰
+              </div>
+            )}
+            {card.hasQuickAttack && (
+              <div
+                title="Ataque Rápido (al atacar no recibe daño de represalia del defensor)"
+                className="-ml-0.5 px-1 py-0.2 rounded bg-[#7c2d12] border border-[#fde047] text-[7.5px] font-display font-bold text-[#fef9c3] shadow-md"
+              >
+                ⚡
+              </div>
+            )}
+            {card.hasReach && (
+              <div
+                title="Rango (puede atacar la Colonia enemiga ignorando unidades en la Zona de Combate)"
+                className="-ml-0.5 px-1 py-0.2 rounded bg-[#1e3a8a] border border-[#60a5fa] text-[7.5px] font-display font-bold text-[#dbeafe] shadow-md"
+              >
+                🏹
+              </div>
+            )}
+
             {/* Integrated Base Attack Sword Tag when different from CurrentV */}
             {isCitizen && (attackV !== currentV || vitalityMode === 'base_attack') && (
               <div
@@ -460,13 +491,49 @@ export const CardView: React.FC<CardViewProps> = ({
                 : 'text-[#c7d2fe]'
             }`}
           >
-            {isCitizen
+            {card.isCommander
+              ? 'Comandante • Ciudadano'
+              : card.isLocation
+              ? 'Locación • Herramienta'
+              : isCitizen
               ? 'Ciudadano • Bastión'
               : isTool
               ? 'Herramienta • Bastión'
               : 'Evento • Efecto'}
           </span>
-          <div className="flex items-center gap-0.5 shrink-0">
+          <div className="flex items-center gap-0.5 shrink-0 flex-wrap justify-end">
+            {card.isCommander && (
+              <span
+                title="Comandante (comienza fuera del mazo y pasa a tu mano tras el Mulligan)"
+                className="text-[7px] font-display uppercase px-1 rounded-sm bg-[#78350f] text-[#fef08a] border border-[#facc15]/80"
+              >
+                👑
+              </span>
+            )}
+            {card.isDefender && (
+              <span
+                title="Defensor (debe ser atacado primero en su zona)"
+                className="text-[7px] font-display uppercase px-1 rounded-sm bg-[#78350f] text-[#fde68a] border border-[#f59e0b]/70"
+              >
+                Defensor
+              </span>
+            )}
+            {card.hasQuickAttack && (
+              <span
+                title="Ataque Rápido (no recibe daño de represalia al atacar)"
+                className="text-[7px] font-display uppercase px-1 rounded-sm bg-[#7c2d12] text-[#fef08a] border border-[#f97316]/70"
+              >
+                Rápido
+              </span>
+            )}
+            {card.hasReach && (
+              <span
+                title="Rango (puede atacar la Colonia enemiga ignorando unidades en Combate)"
+                className="text-[7px] font-display uppercase px-1 rounded-sm bg-[#1e3a8a] text-[#bfdbfe] border border-[#60a5fa]/70"
+              >
+                Rango
+              </span>
+            )}
             {card.isSpy && (
               <span
                 title="Espía (se juega del lado del oponente)"

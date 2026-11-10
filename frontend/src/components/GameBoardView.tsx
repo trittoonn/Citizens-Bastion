@@ -484,7 +484,18 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
     selectedBoardCard &&
     selectedBoardCard.definition.type === 'citizen' &&
     selectedBoardCard.zone === 'combat' &&
-    !selectedBoardCard.attackedThisTurn;
+    !selectedBoardCard.attackedThisTurn &&
+    !selectedBoardCard.movedThisTurn;
+
+  const canSelectedBoardCardActivateWear = Boolean(
+    view.phase === 'MAIN' &&
+      view.isYourTurn &&
+      selectedBoardCard &&
+      !selectedBoardCard.usedAbilityThisTurn &&
+      selectedBoardCard.definition.abilities?.some((ab) => ab.trigger === 'activated_wear')
+  );
+
+  const maxUnitsPerZone = view.rules.maxUnitsPerZone || 5;
 
   const canPlaySelectedCitizenInZone = (zone: 'city' | 'road' | 'combat') => {
     if (
@@ -498,7 +509,12 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
       return false;
     }
     if (selectedHandCard.definition.isSpy) {
-      return true;
+      const oppCount = view.opponent?.board[zone]?.length || 0;
+      return oppCount < maxUnitsPerZone;
+    }
+    const myCount = view.you.board[zone]?.length || 0;
+    if (myCount >= maxUnitsPerZone) {
+      return false;
     }
     if (zone === 'combat') {
       return view.canPlayInCombatZone;
@@ -513,8 +529,13 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
       !selectedBoardCard ||
       selectedBoardCard.definition.type !== 'citizen' ||
       selectedBoardCard.playedThisTurn ||
-      selectedBoardCard.movedThisTurn
+      selectedBoardCard.movedThisTurn ||
+      selectedBoardCard.attackedThisTurn
     ) {
+      return false;
+    }
+    const myCount = view.you.board[zone]?.length || 0;
+    if (myCount >= maxUnitsPerZone) {
       return false;
     }
     return areAdjacent(selectedBoardCard.zone, zone);
@@ -1281,6 +1302,22 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
                 </>
               ) : selectedBoardCard ? (
                 <>
+                  {canSelectedBoardCardActivateWear && (
+                    <button
+                      type="button"
+                      disabled={submitting}
+                      onClick={() =>
+                        sendAction({
+                          type: 'ACTIVATE_ABILITY',
+                          cardInstanceId: selectedBoardCard.instanceId,
+                        })
+                      }
+                      className="btn-war-gold w-full px-3 py-1.5 rounded text-[10px] flex items-center justify-center gap-1 shadow-[0_0_16px_rgba(243,212,107,0.7)]"
+                    >
+                      <Flame className="w-3.5 h-3.5 shrink-0" />
+                      <span>Activar Desgaste</span>
+                    </button>
+                  )}
                   <span className="font-display text-[10px] font-bold text-[#f3d46b] text-right leading-tight">
                     ↗ Elegí fila adyacente o blanco enemigo
                   </span>

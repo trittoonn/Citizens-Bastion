@@ -792,6 +792,262 @@ function renderFantasyScene(key: string, fallbackIcon: string, baseColor: string
         </svg>
       );
 
+    case 'cientifico_loco':
+    case 'token_abominacion':
+      return (
+        <svg viewBox="0 0 240 160" className="w-full h-full" preserveAspectRatio="xMidYMid slice">
+          <rect width="240" height="160" fill="#172554" />
+          <circle cx="120" cy="76" r="56" fill="#22c55e" opacity="0.22" />
+          <polyline points="20,25 65,60 52,72 95,105" fill="none" stroke="#86efac" strokeWidth="3" />
+          <polyline points="220,25 175,60 188,72 145,105" fill="none" stroke="#86efac" strokeWidth="3" />
+          <path d="M74,160 C80,108 96,86 120,86 C144,86 160,108 166,160 Z" fill="#f8fafc" stroke="#4ade80" strokeWidth="2.5" />
+          <circle cx="120" cy="60" r="20" fill="#bbf7d0" stroke="#15803d" strokeWidth="2.5" />
+          <circle cx="112" cy="58" r="6" fill="#0284c7" stroke="#fde047" strokeWidth="2" />
+          <circle cx="128" cy="58" r="6" fill="#0284c7" stroke="#fde047" strokeWidth="2" />
+          <path d="M170,96 L186,96 L194,136 L162,136 Z" fill="#4ade80" stroke="#f8fafc" strokeWidth="2" />
+        </svg>
+      );
+
+    case 'retirada':
+      return (
+        <svg viewBox="0 0 240 160" className="w-full h-full" preserveAspectRatio="xMidYMid slice">
+          <rect width="240" height="160" fill="#0f172a" />
+          <path d="M40,120 Q120,40 200,120" fill="none" stroke="#38bdf8" strokeWidth="4" strokeDasharray="8 5" />
+          <polygon points="50,90 95,62 95,118" fill="#fef08a" stroke="#d97706" strokeWidth="2.5" />
+          <polygon points="110,90 155,62 155,118" fill="#7dd3fc" stroke="#0284c7" strokeWidth="2" />
+          <circle cx="182" cy="90" r="20" fill="#1e293b" stroke="#94a3b8" strokeWidth="2.5" />
+        </svg>
+      );
+
+    case 'general_brazo_de_canon':
+      return (
+        <svg viewBox="0 0 240 160" className="w-full h-full" preserveAspectRatio="xMidYMid slice">
+          <rect width="240" height="160" fill="#14532d" />
+          <circle cx="185" cy="56" r="36" fill="#f97316" opacity="0.45" />
+          <path d="M62,160 C68,106 86,84 112,84 C138,84 154,106 160,160 Z" fill="#1e293b" stroke="#84cc16" strokeWidth="2.5" />
+          <circle cx="112" cy="56" r="18" fill="#475569" stroke="#fde047" strokeWidth="2.5" />
+          <polygon points="94,40 132,36 126,50 96,50" fill="#15803d" stroke="#bef264" strokeWidth="2" />
+          {/* Heavy Cannon Arm firing right */}
+          <rect x="128" y="68" width="76" height="26" rx="6" fill="#334155" stroke="#a3e635" strokeWidth="3" />
+          <circle cx="210" cy="81" r="14" fill="#fef08a" stroke="#ef4444" strokeWidth="3" />
+        </svg>
+      );
+
+    case 'lluvia_acida':
+      return (
+        <svg viewBox="0 0 240 160" className="w-full h-full" preserveAspectRatio="xMidYMid slice">
+          <rect width="240" height="160" fill="#1a2e05" />
+          <g stroke="#a3e635" strokeWidth="3" strokeLinecap="round">
+            <line x1="45" y1="15" x2="30" y2="65" />
+            <line x1="95" y1="10" x2="80" y2="60" />
+            <line x1="145" y1="18" x2="130" y2="68" />
+            <line x1="195" y1="12" x2="180" y2="62" />
+            <line x1="70" y1="65" x2="55" y2="115" />
+            <line x1="125" y1="70" x2="110" y2="120" />
+            <line x1="175" y1="68" x2="160" y2="118" />
+          </g>
+          <ellipse cx="120" cy="138" rx="85" ry="14" fill="#65a30d" stroke="#bef264" strokeWidth="2.5" />
+          <circle cx="95" cy="134" r="6" fill="#ecfccb" />
+          <circle cx="148" cy="138" r="8" fill="#ecfccb" />
+        </svg>
+      );
+
+    case 'supersoldado_de_elite':
+      return (
+        <svg viewBox="0 0 240 160" className="w-full h-full" preserveAspectRatio="xMidYMid slice">
+          <rect width="240" height="160" fill="#052e16" />
+          <circle cx="120" cy="82" r="58" fill="#22c55e" opacity="0.25" />
+          <path d="M58,160 C64,96 86,74 120,74 C154,74 176,96 182,160 Z" fill="#14532d" stroke="#86efac" strokeWidth="3" />
+          <rect x="96" y="34" width="48" height="42" rx="10" fill="#1e293b" stroke="#4ade80" strokeWidth="2.5" />
+          <rect x="104" y="48" width="32" height="10" rx="4" fill="#bef264" />
+          <circle cx="120" cy="112" r="14" fill="#a3e635" stroke="#ecfccb" strokeWidth="2.5" />
+        </svg>
+      );
+
+    case 'fuerza_antihuelga':
+      return (
+        <svg viewBox="0 0 240 160" className="w-full h-full" preserveAspectRatio="xMidYMid slice">
+          <rect width="240" height="160" fill="#1e293b" />
+          <rect x="44" y="36" width="68" height="108" rx="8" fill="#0f172a" stroke="#38bdf8" strokeWidth="3" />
+          <rect x="128" y="36" width="68" height="108" rx="8" fill="#0f172a" stroke="#38bdf8" strokeWidth="3" />
+          <rect x="82" y="26" width="76" height="118" rx="10" fill="#1e3a8a" stroke="#fef08a" strokeWidth="3.5" />
+          <rect x="96" y="44" width="48" height="18" rx="3" fill="#bae6fd" opacity="0.85" />
+        </svg>
+      );
+
+    case 'cadetes_trillizos':
+    case 'token_policias_mellizos':
+    case 'token_oficial_solitario':
+      return (
+        <svg viewBox="0 0 240 160" className="w-full h-full" preserveAspectRatio="xMidYMid slice">
+          <rect width="240" height="160" fill="#172554" />
+          <circle cx="64" cy="70" r="16" fill="#1e40af" stroke="#93c5fd" strokeWidth="2" />
+          <path d="M40,160 C44,114 52,92 64,92 C76,92 84,114 88,160 Z" fill="#1e3a8a" stroke="#60a5fa" strokeWidth="2" />
+          <circle cx="176" cy="70" r="16" fill="#1e40af" stroke="#93c5fd" strokeWidth="2" />
+          <path d="M152,160 C156,114 164,92 176,92 C188,92 196,114 200,160 Z" fill="#1e3a8a" stroke="#60a5fa" strokeWidth="2" />
+          <circle cx="120" cy="56" r="18" fill="#2563eb" stroke="#fde047" strokeWidth="2.5" />
+          <path d="M90,160 C94,106 106,82 120,82 C134,82 146,106 150,160 Z" fill="#1d4ed8" stroke="#fde047" strokeWidth="2.5" />
+        </svg>
+      );
+
+    case 'pila_de_muertos':
+      return (
+        <svg viewBox="0 0 240 160" className="w-full h-full" preserveAspectRatio="xMidYMid slice">
+          <rect width="240" height="160" fill="#1c1917" />
+          <path d="M25,160 Q120,55 215,160 Z" fill="#3f6212" stroke="#84cc16" strokeWidth="2.5" />
+          <circle cx="95" cy="124" r="14" fill="#d6d3d1" stroke="#292524" strokeWidth="2" />
+          <circle cx="145" cy="126" r="14" fill="#d6d3d1" stroke="#292524" strokeWidth="2" />
+          <circle cx="120" cy="96" r="16" fill="#e7e5e4" stroke="#a3e635" strokeWidth="2.5" />
+          <path d="M80,45 L160,45 L152,115 L120,138 L88,115 Z" fill="none" stroke="#a3e635" strokeWidth="3" strokeDasharray="6 4" />
+        </svg>
+      );
+
+    case 'constructor_de_cementerios':
+      return (
+        <svg viewBox="0 0 240 160" className="w-full h-full" preserveAspectRatio="xMidYMid slice">
+          <rect width="240" height="160" fill="#0f172a" />
+          <path d="M42,160 L42,96 C42,78 78,78 78,96 L78,160 Z" fill="#475569" stroke="#94a3b8" strokeWidth="2" />
+          <path d="M162,160 L162,96 C162,78 198,78 198,96 L198,160 Z" fill="#475569" stroke="#94a3b8" strokeWidth="2" />
+          <circle cx="120" cy="64" r="18" fill="#334155" stroke="#a3e635" strokeWidth="2.5" />
+          <path d="M86,160 C90,108 104,88 120,88 C136,88 150,108 154,160 Z" fill="#1e293b" stroke="#a3e635" strokeWidth="2.5" />
+        </svg>
+      );
+
+    case 'municiones_vivas':
+      return (
+        <svg viewBox="0 0 240 160" className="w-full h-full" preserveAspectRatio="xMidYMid slice">
+          <rect width="240" height="160" fill="#3b0764" />
+          <ellipse cx="120" cy="78" rx="46" ry="26" transform="rotate(-22 120 78)" fill="#84cc16" stroke="#ecfccb" strokeWidth="3" />
+          <circle cx="108" cy="72" r="6" fill="#dc2626" />
+          <circle cx="132" cy="66" r="6" fill="#dc2626" />
+          <path d="M30,130 L95,92" stroke="#f97316" strokeWidth="6" strokeLinecap="round" />
+        </svg>
+      );
+
+    case 'extension_artificial_de_vida':
+      return (
+        <svg viewBox="0 0 240 160" className="w-full h-full" preserveAspectRatio="xMidYMid slice">
+          <rect width="240" height="160" fill="#022c22" />
+          <rect x="78" y="20" width="84" height="120" rx="14" fill="#14b8a6" opacity="0.35" stroke="#5eead4" strokeWidth="3" />
+          <circle cx="120" cy="78" r="24" fill="#a3e635" stroke="#fef08a" strokeWidth="2.5" />
+          <path d="M120,62 L120,94 M104,78 L136,78" stroke="#052e16" strokeWidth="5" />
+        </svg>
+      );
+
+    case 'sujeto_de_prueba':
+      return (
+        <svg viewBox="0 0 240 160" className="w-full h-full" preserveAspectRatio="xMidYMid slice">
+          <rect width="240" height="160" fill="#1a2e05" />
+          <circle cx="120" cy="74" r="46" fill="#65a30d" opacity="0.3" />
+          <circle cx="120" cy="62" r="20" fill="#a3e635" stroke="#ecfccb" strokeWidth="2.5" />
+          <path d="M84,160 C88,108 102,88 120,88 C138,88 152,108 156,160 Z" fill="#365314" stroke="#bef264" strokeWidth="2.5" />
+        </svg>
+      );
+
+    case 'la_noche_de_los_muertos_vivos':
+    case 'cementerio_infectado':
+    case 'token_zombie':
+      return (
+        <svg viewBox="0 0 240 160" className="w-full h-full" preserveAspectRatio="xMidYMid slice">
+          <rect width="240" height="160" fill="#142606" />
+          <circle cx="184" cy="38" r="24" fill="#bef264" opacity="0.8" />
+          <path d="M0,122 Q120,96 240,122 L240,160 L0,160 Z" fill="#1a2e05" stroke="#65a30d" strokeWidth="2" />
+          {/* Zombie hands rising from the grave */}
+          <path d="M66,140 L66,78 L56,64 M66,78 L66,58 M66,78 L76,64" fill="none" stroke="#84cc16" strokeWidth="5" strokeLinecap="round" />
+          <path d="M124,140 L124,68 L114,54 M124,68 L124,48 M124,68 L134,54" fill="none" stroke="#a3e635" strokeWidth="5.5" strokeLinecap="round" />
+          <path d="M174,145 L174,90 L184,74" fill="none" stroke="#84cc16" strokeWidth="4.5" strokeLinecap="round" />
+        </svg>
+      );
+
+    case 'cremadora_sospechosa':
+      return (
+        <svg viewBox="0 0 240 160" className="w-full h-full" preserveAspectRatio="xMidYMid slice">
+          <rect width="240" height="160" fill="#1c1917" />
+          <rect x="64" y="42" width="112" height="108" rx="12" fill="#292524" stroke="#f97316" strokeWidth="3" />
+          <circle cx="120" cy="96" r="32" fill="#7c2d12" stroke="#fde047" strokeWidth="3" />
+          <polygon points="120,68 136,104 120,96 104,104" fill="#fef08a" />
+          <path d="M95,18 Q120,38 145,12" fill="none" stroke="#a3e635" strokeWidth="4" />
+        </svg>
+      );
+
+    case 'espidi':
+      return (
+        <svg viewBox="0 0 240 160" className="w-full h-full" preserveAspectRatio="xMidYMid slice">
+          <rect width="240" height="160" fill="#431407" />
+          <polyline points="15,85 95,85 75,60 165,60 145,35 225,35" fill="none" stroke="#fde047" strokeWidth="5" />
+          <circle cx="136" cy="76" r="22" fill="#f97316" stroke="#fef08a" strokeWidth="3" />
+        </svg>
+      );
+
+    case 'guia_contratado':
+    case 'camino_bifurcado':
+      return (
+        <svg viewBox="0 0 240 160" className="w-full h-full" preserveAspectRatio="xMidYMid slice">
+          <rect width="240" height="160" fill="#422006" />
+          <path d="M95,160 L110,95 L55,35 L80,35 L120,80 L160,35 L185,35 L130,95 L145,160 Z" fill="#a16207" stroke="#fef08a" strokeWidth="2.5" />
+          <circle cx="120" cy="48" r="16" fill="#facc15" stroke="#78350f" strokeWidth="2" />
+        </svg>
+      );
+
+    case 'vendedor_ambulante':
+      return (
+        <svg viewBox="0 0 240 160" className="w-full h-full" preserveAspectRatio="xMidYMid slice">
+          <rect width="240" height="160" fill="#451a03" />
+          <circle cx="120" cy="72" r="42" fill="#b45309" stroke="#fde047" strokeWidth="3" />
+          <rect x="86" y="96" width="68" height="48" rx="8" fill="#78350f" stroke="#f59e0b" strokeWidth="2.5" />
+          <circle cx="120" cy="64" r="14" fill="#fef08a" />
+        </svg>
+      );
+
+    case 'lanzador_de_escombros':
+      return (
+        <svg viewBox="0 0 240 160" className="w-full h-full" preserveAspectRatio="xMidYMid slice">
+          <rect width="240" height="160" fill="#292524" />
+          <line x1="45" y1="135" x2="165" y2="45" stroke="#a8a29e" strokeWidth="8" />
+          <circle cx="178" cy="40" r="20" fill="#f97316" stroke="#fef08a" strokeWidth="3" />
+          <circle cx="85" cy="118" r="24" fill="#57534e" stroke="#d6d3d1" strokeWidth="3" />
+        </svg>
+      );
+
+    case 'busqueda_del_tesoro':
+      return (
+        <svg viewBox="0 0 240 160" className="w-full h-full" preserveAspectRatio="xMidYMid slice">
+          <rect width="240" height="160" fill="#422006" />
+          <rect x="68" y="56" width="104" height="72" rx="10" fill="#92400e" stroke="#facc15" strokeWidth="3.5" />
+          <line x1="68" y1="86" x2="172" y2="86" stroke="#facc15" strokeWidth="4" />
+          <circle cx="120" cy="86" r="10" fill="#fef08a" stroke="#78350f" strokeWidth="2.5" />
+        </svg>
+      );
+
+    case 'templo_antiguo':
+    case 'token_guardian_templo':
+      return (
+        <svg viewBox="0 0 240 160" className="w-full h-full" preserveAspectRatio="xMidYMid slice">
+          <rect width="240" height="160" fill="#27272a" />
+          <polygon points="36,160 68,96 172,96 204,160" fill="#52525b" stroke="#facc15" strokeWidth="2.5" />
+          <polygon points="62,96 88,48 152,48 178,96" fill="#71717a" stroke="#fef08a" strokeWidth="2.5" />
+          <circle cx="120" cy="72" r="14" fill="#fef08a" />
+        </svg>
+      );
+
+    case 'pala_neumatica':
+      return (
+        <svg viewBox="0 0 240 160" className="w-full h-full" preserveAspectRatio="xMidYMid slice">
+          <rect width="240" height="160" fill="#1e293b" />
+          <line x1="60" y1="30" x2="155" y2="115" stroke="#94a3b8" strokeWidth="10" strokeLinecap="round" />
+          <polygon points="145,100 190,115 170,148 130,125" fill="#f59e0b" stroke="#fef08a" strokeWidth="2.5" />
+        </svg>
+      );
+
+    case 'trampa_defectuosa':
+      return (
+        <svg viewBox="0 0 240 160" className="w-full h-full" preserveAspectRatio="xMidYMid slice">
+          <rect width="240" height="160" fill="#31102f" />
+          <circle cx="120" cy="86" r="44" fill="#1e293b" stroke="#f43f5e" strokeWidth="3.5" strokeDasharray="10 5" />
+          <polygon points="120,42 132,74 166,74 138,94 148,126 120,106 92,126 102,94 74,74 108,74" fill="#fde047" />
+        </svg>
+      );
+
     default:
       if (fallbackIcon && fallbackIcon !== key && fallbackIcon !== 'default') {
         return renderFantasyScene(fallbackIcon, 'default', baseColor);

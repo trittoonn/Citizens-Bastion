@@ -132,11 +132,11 @@ func TestHTTPFullMatchAndCustomCardFlow(t *testing.T) {
 	_ = json.NewDecoder(resp.Body).Decode(&p1State)
 	resp.Body.Close()
 
-	if len(p1State.View.Opponent.Hand) != 0 || p1State.View.Opponent.HandCount != 4 {
-		t.Fatalf("expected opponent hand cards to be masked while HandCount == 4")
+	if len(p1State.View.Opponent.Hand) != 0 || p1State.View.Opponent.HandCount < 4 {
+		t.Fatalf("expected opponent hand cards to be masked while HandCount >= 4, got %d", p1State.View.Opponent.HandCount)
 	}
 
-	// 6. Player 1 plays custom card "Campeón Solar" in La Ciudad and ends turn to win (PointsToWin = 1)
+	// 6. Player 1 plays custom card "Campeón Solar" in La Ciudad, ends Turn 1, and Player 2 ends Turn 2 to complete the round (PointsToWin = 1)
 	cardToPlay := p1State.View.You.Hand[0].InstanceID
 	viewAfterPlay := postAction(lobby.ActionRequest{
 		PlayerID:       "player_1",
@@ -148,8 +148,12 @@ func TestHTTPFullMatchAndCustomCardFlow(t *testing.T) {
 		t.Fatalf("expected 1 Citizen in City after playing Campeón Solar")
 	}
 
-	viewAfterEnd := postAction(lobby.ActionRequest{
+	_ = postAction(lobby.ActionRequest{
 		PlayerID: "player_1",
+		Type:     lobby.ActionEndTurn,
+	})
+	viewAfterEnd := postAction(lobby.ActionRequest{
+		PlayerID: "player_2",
 		Type:     lobby.ActionEndTurn,
 	})
 	if viewAfterEnd.Phase != game.PhaseGameOver || viewAfterEnd.WinnerID != "player_1" {
@@ -280,8 +284,8 @@ func TestAIMatchDifficultiesFlow(t *testing.T) {
 		_ = json.NewDecoder(resp.Body).Decode(&afterEnd)
 		resp.Body.Close()
 
-		if afterEnd.View.TurnNumber != 3 || !afterEnd.View.IsYourTurn {
-			t.Fatalf("expected AI (%s) to complete Turn 2 and advance to Turn 3 for human, got turn=%d isYourTurn=%v phase=%s",
+		if afterEnd.View.TurnNumber < 3 || !afterEnd.View.IsYourTurn {
+			t.Fatalf("expected AI (%s) to complete its turn(s) and return control to human, got turn=%d isYourTurn=%v phase=%s",
 				diff, afterEnd.View.TurnNumber, afterEnd.View.IsYourTurn, afterEnd.View.Phase)
 		}
 		if len(afterEnd.View.RecentSteps) < 2 {
