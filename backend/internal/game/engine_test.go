@@ -616,3 +616,340 @@ func TestAIVsAISimulationParallel(t *testing.T) {
 		t.Fatalf("expected CardMetrics to be populated")
 	}
 }
+
+func TestQoLCitizenArmorAndActiveEventAndConditionalAbilities(t *testing.T) {
+	rules := DefaultRulesConfig()
+	cab := cardByID("caballero_galardonado")
+
+	gs := NewGameState("g_qol", "QoL Test", rules)
+	_ = gs.AddPlayer("p1", "Alice", makeUniformDeck(cab, 15))
+	_ = gs.AddPlayer("p2", "Bob", makeUniformDeck(cab, 15))
+	_ = gs.ApplyMulligan("p1", nil)
+	_ = gs.ApplyMulligan("p2", nil)
+
+	p1 := gs.Players[0]
+	p2 := gs.Players[1]
+	gs.PlaysRemaining = 5
+
+	// 1. Citizen with Vitality (3V) and Armor (2A)
+	armoredCitizen := CardDefinition{
+		ID:       "custom_armored",
+		Name:     "Paladín Blindado",
+		Type:     CardTypeCitizen,
+		Subtype:  "Soldado",
+		Planet:   "General / Bastión",
+		Vitality: 3,
+		Armor:    2,
+	}
+	p2.Board[ZoneCombat] = []*CardInstance{
+		{
+			InstanceID:      "p2_armored",
+			OwnerID:         "p2",
+			Definition:      armoredCitizen,
+			BaseVitality:    3,
+			CurrentVitality: 3,
+			BaseArmor:       2,
+			CurrentArmor:    2,
+			Zone:            ZoneCombat,
+		},
+	}
+
+	// Play an Event with target selection (3 damage to an enemy Citizen)
+	rayoDef := CardDefinition{
+		ID:     "rayo_de_plutonio",
+		Name:   "Rayo de Plutonio",
+		Type:   CardTypeEvent,
+		Planet: "Plutonio",
+		Abilities: []Ability{
+			{
+				Trigger: TriggerImmediate,
+				Steps: []EffectStep{
+					{
+						Op:     EffectDealDamage,
+						Amount: 3,
+						Target: TargetRule{
+							Requirement: TargetReqSingleCard,
+							Owner:       TargetOwnerEnemy,
+							Zones:       []ZoneID{ZoneCity, ZoneRoad, ZoneCombat},
+							CardType:    CardTypeCitizen,
+						},
+					},
+				},
+			},
+		},
+	}
+	rayo := &CardInstance{
+		InstanceID: "p1_rayo",
+		OwnerID:    "p1",
+		Definition: rayoDef,
+		Zone:       ZoneHand,
+	}
+	p1.Hand = append(p1.Hand, rayo)
+
+	if err := gs.PlayCard("p1", "p1_rayo", ""); err != nil {
+		t.Fatalf("PlayCard Rayo de Plutonio failed: %v", err)
+	}
+	if gs.Phase != PhaseAwaitingInput {
+		t.Fatalf("expected PhaseAwaitingInput while resolving Rayo de Plutonio, got %s", gs.Phase)
+	}
+
+	// Opponent's view must show ActiveEvent while Rayo de Plutonio is awaiting target selection!
+	oppView, err := gs.BuildPlayerView("p2")
+	if err != nil {
+		t.Fatalf("BuildPlayerView(p2) failed: %v", err)
+	}
+	if oppView.ActiveEvent == nil || oppView.ActiveEvent.Card.ID != "rayo_de_plutonio" {
+		t.Fatalf("expected Opponent view to include ActiveEvent for rayo_de_plutonio while resolving, got %+v", oppView.ActiveEvent)
+	}
+
+	// Resolve target selection on p2_armored (3V, 2A): 3 damage -> 2 absorbed by Armor (0A left), 1 damage to Vitality (2V left)
+	if err := gs.SubmitPromptTarget("p1", "p2_armored"); err != nil {
+		t.Fatalf("SubmitPromptTarget failed: %v", err)
+	}
+	if gs.ActiveEvent != nil {
+		t.Fatalf("expected ActiveEvent to be cleared after Event finishes resolving, got %+v", gs.ActiveEvent)
+	}
+	if p2.Board[ZoneCombat][0].CurrentArmor != 0 || p2.Board[ZoneCombat][0].CurrentVitality != 2 {
+		t.Fatalf("expected Paladín Blindado to have 0A and 2V after taking 3 damage, got %dA and %dV",
+			p2.Board[ZoneCombat][0].CurrentArmor, p2.Board[ZoneCombat][0].CurrentVitality)
+	}
+}
+
+func TestRuleChangesLeaderPositioningDeferredConditionsAndManualTargets(t *testing.T) {
+	rules := DefaultRulesConfig()
+	rules.MaxPlaysPerTurn = 15
+	rules.FirstTurnMaxPlays = 15
+
+	cab := cardByID("caballero_galardonado")
+	leaderDef := cardByID("general_brazo_de_canon")
+
+	deckP1 := makeUniformDeck(cab, 14)
+	deckP1 = append(deckP1, leaderDef)
+	deckP2 := makeUniformDeck(cab, 14)
+	deckP2 = append(deckP2, leaderDef)
+
+	gs := NewGameState("g_rules9", "Nine Rules Test", rules)
+	if err := gs.AddPlayer("p1", "Alice", deckP1); err != nil {
+		t.Fatalf("AddPlayer p1 failed: %v", err)
+	}
+	if err := gs.AddPlayer("p2", "Bob", deckP2); err != nil {
+		t.Fatalf("AddPlayer p2 failed: %v", err)
+	}
+	_ = gs.ApplyMulligan("p1", nil)
+	_ = gs.ApplyMulligan("p2", nil)
+
+	p1 := gs.Players[0]
+	p2 := gs.Players[1]
+
+	// 1 & 2. Dedicated Leader Zone & Face-down on death
+	if p1.Leader == nil || p1.Leader.Zone != ZoneLeader || p1.Leader.FaceDown {
+		t.Fatalf("expected P1 Leader in ZoneLeader face-up, got %+v", p1.Leader)
+	}
+	for _, hc := range p1.Hand {
+		if hc.Definition.IsCommander {
+			t.Fatalf("did not expect Commander in Hand when using dedicated ZoneLeader")
+		}
+	}
+	leaderID := p1.Leader.InstanceID
+	if err := gs.PlayCard("p1", leaderID, ZoneCity); err != nil {
+		t.Fatalf("PlayCard Leader from ZoneLeader failed: %v", err)
+	}
+	if p1.Leader != nil {
+		t.Fatalf("expected p1.Leader to be nil while Leader is on board")
+	}
+
+	// Destroy the Leader on the board -> returns to ZoneLeader face-down, NOT Discard!
+	gs.destroyBoardCard(p1, leaderID)
+	if p1.Leader == nil || !p1.Leader.FaceDown || p1.Leader.Zone != ZoneLeader {
+		t.Fatalf("expected destroyed Leader to return to ZoneLeader with FaceDown=true, got %+v", p1.Leader)
+	}
+	for _, dc := range p1.Discard {
+		if dc.InstanceID == leaderID {
+			t.Fatalf("destroyed Leader must not go to Discard pile")
+		}
+	}
+	if err := gs.PlayCard("p1", leaderID, ZoneCity); err == nil {
+		t.Fatalf("expected error when attempting to replay a face-down Leader")
+	}
+
+	// 3. Vitality buff on board resets to base V when sent to Discard (unless ModifyBaseVitality is true)
+	unit := &CardInstance{
+		InstanceID:      "p1_buffed",
+		OwnerID:         "p1",
+		Definition:      cab, // 8V base
+		BaseVitality:    8,
+		CurrentVitality: 8,
+		Zone:            ZoneCity,
+	}
+	p1.Board[ZoneCity] = []*CardInstance{unit}
+	gs.executeEffectStepWithTarget(QueuedEffect{
+		ControllerID:   "p1",
+		SourceCardID:   "p1_buffed",
+		SourceCardName: "Buff Test",
+		Step: EffectStep{
+			Op:     EffectModifyStat,
+			Amount: 5,
+			Target: TargetRule{Requirement: TargetReqSelfCard},
+		},
+	}, "")
+	if unit.CurrentVitality != 13 || unit.BaseVitality != 8 {
+		t.Fatalf("expected buffed unit on board to have 13 CurrentVitality and 8 BaseVitality, got %d/%d", unit.CurrentVitality, unit.BaseVitality)
+	}
+	gs.destroyBoardCard(p1, "p1_buffed")
+	if unit.CurrentVitality != 8 || unit.BaseVitality != 8 {
+		t.Fatalf("expected unit in Discard to reset to 8V base, got %d/%d", unit.CurrentVitality, unit.BaseVitality)
+	}
+
+	// 6. Exact row placement (targetIndex) when playing a card:
+	// Place two units in P1's ZoneRoad, then play a third card at targetIndex=1 (between them)
+	cLeft := &CardInstance{InstanceID: "r_left", OwnerID: "p1", Definition: cab, BaseVitality: 8, CurrentVitality: 8, Zone: ZoneRoad}
+	cRight := &CardInstance{InstanceID: "r_right", OwnerID: "p1", Definition: cab, BaseVitality: 8, CurrentVitality: 8, Zone: ZoneRoad}
+	p1.Board[ZoneRoad] = []*CardInstance{cLeft, cRight}
+	cMid := &CardInstance{InstanceID: "r_mid", OwnerID: "p1", Definition: cardByID("granjero"), Zone: ZoneHand}
+	p1.Hand = append(p1.Hand, cMid)
+	if err := gs.PlayCard("p1", "r_mid", ZoneRoad, 1); err != nil {
+		t.Fatalf("PlayCard with targetIndex=1 failed: %v", err)
+	}
+	if len(p1.Board[ZoneRoad]) != 3 || p1.Board[ZoneRoad][1].InstanceID != "r_mid" {
+		t.Fatalf("expected r_mid at index 1 in ZoneRoad, got %+v", p1.Board[ZoneRoad])
+	}
+
+	// 7. "Cualquier objetivo" (Rayo vengativo) can target a Tool as well as a Citizen
+	enemyTool := &CardInstance{
+		InstanceID:      "p2_tool",
+		OwnerID:         "p2",
+		Definition:      cardByID("cementerio_infectado"),
+		BaseVitality:    5,
+		CurrentVitality: 5,
+		BaseArmor:       5,
+		CurrentArmor:    5,
+		Zone:            ZoneRoad,
+	}
+	p2.Board[ZoneRoad] = []*CardInstance{enemyTool}
+	rayo := &CardInstance{InstanceID: "p1_rayo_tool", OwnerID: "p1", Definition: cardByID("rayo_vengativo"), Zone: ZoneHand}
+	p1.Hand = append(p1.Hand, rayo)
+	if err := gs.PlayCard("p1", "p1_rayo_tool", ""); err != nil {
+		t.Fatalf("Play Rayo vengativo failed: %v", err)
+	}
+	if err := gs.SubmitPromptTarget("p1", "p2_tool"); err != nil {
+		t.Fatalf("expected Rayo vengativo ('cualquier objetivo') to allow targeting enemy Tool p2_tool: %v", err)
+	}
+	if enemyTool.CurrentVitality != 1 || enemyTool.CurrentArmor != 1 {
+		t.Fatalf("expected Cementerio infectado to be at 1A/1V after 4 damage, got %dV/%dA", enemyTool.CurrentVitality, enemyTool.CurrentArmor)
+	}
+
+	// 9. "Jugá una carta de tu mazo" (Constructor de cementerios) lets player pick the Location from Deck AND the board row
+	locCard := &CardInstance{
+		InstanceID: "deck_loc_1",
+		OwnerID:    "p1",
+		Definition: cardByID("cementerio_infectado"),
+		Zone:       ZoneDeck,
+	}
+	p1.Deck = append([]*CardInstance{locCard}, p1.Deck...)
+	constructor := &CardInstance{
+		InstanceID: "p1_constructor",
+		OwnerID:    "p1",
+		Definition: cardByID("constructor_de_cementerios"),
+		Zone:       ZoneHand,
+	}
+	p1.Hand = append(p1.Hand, constructor)
+	if err := gs.PlayCard("p1", "p1_constructor", ZoneCity); err != nil {
+		t.Fatalf("Play Constructor de cementerios failed: %v", err)
+	}
+	if gs.Phase != PhaseAwaitingInput || gs.PendingPrompt == nil || gs.PendingPrompt.PromptType != "cards" {
+		t.Fatalf("expected card selection prompt for Constructor de cementerios, got %+v", gs.PendingPrompt)
+	}
+	if err := gs.SubmitPromptTarget("p1", "deck_loc_1"); err != nil {
+		t.Fatalf("SubmitPromptTarget deck_loc_1 failed: %v", err)
+	}
+	if gs.Phase != PhaseAwaitingInput || gs.PendingPrompt == nil || gs.PendingPrompt.PromptType != "zone" {
+		t.Fatalf("expected zone selection prompt after picking Location from deck, got phase=%s prompt=%+v", gs.Phase, gs.PendingPrompt)
+	}
+	if err := gs.SubmitPromptTarget("p1", string(ZoneCity), 0); err != nil {
+		t.Fatalf("SubmitPromptTarget ZoneCity for Location failed: %v", err)
+	}
+	if len(p1.Board[ZoneCity]) < 1 || p1.Board[ZoneCity][0].InstanceID != "deck_loc_1" {
+		t.Fatalf("expected deck_loc_1 to be placed at index 0 of ZoneCity, got %+v", p1.Board[ZoneCity])
+	}
+
+	// 4 & 5. Manual discard selection for Demoledor de basura + Left-to-Right Deferred Conditional Evaluation!
+	// Place a start-of-turn Demoledor de basura at index 0 (left) and a start-of-turn conditional card at index 1 (right)
+	// that checks ConditionCardLeftDiscardThisTurn.
+	// Before Turn Start, CardsLeftDiscardThisTurn is 0. When Demoledor resolves first (left), it mills 3 chosen cards from Discard,
+	// setting CardsLeftDiscardThisTurn = 3. Then the conditional ability on the right evaluates its condition and triggers!
+	condStartCardDef := CardDefinition{
+		ID:       "cond_watcher",
+		Name:     "Vigía del Cementerio",
+		Type:     CardTypeCitizen,
+		Vitality: 3,
+		Abilities: []Ability{
+			{
+				Trigger:                          TriggerTurnStart,
+				ConditionCardLeftDiscardThisTurn: true,
+				Steps: []EffectStep{
+					{
+						Op:     EffectDrawCards,
+						Amount: 1,
+					},
+				},
+			},
+		},
+	}
+	millStartDef := CardDefinition{
+		ID:       "mill_start_test",
+		Name:     "Demoledor Matutino",
+		Type:     CardTypeCitizen,
+		Vitality: 8,
+		Abilities: []Ability{
+			{
+				Trigger: TriggerTurnStart,
+				Steps:   []EffectStep{{Op: EffectMillOrSacrifice, Amount: 3}},
+			},
+		},
+	}
+	p2.Board[ZoneCombat] = []*CardInstance{
+		{
+			InstanceID:      "p2_demoledor",
+			OwnerID:         "p2",
+			Definition:      millStartDef,
+			BaseVitality:    8,
+			CurrentVitality: 8,
+			Zone:            ZoneCombat,
+		},
+		{
+			InstanceID:      "p2_watcher",
+			OwnerID:         "p2",
+			Definition:      condStartCardDef,
+			BaseVitality:    3,
+			CurrentVitality: 3,
+			Zone:            ZoneCombat,
+		},
+	}
+	p2.Discard = []*CardInstance{
+		{InstanceID: "p2_d1", OwnerID: "p2", Definition: cab, Zone: ZoneDiscard},
+		{InstanceID: "p2_d2", OwnerID: "p2", Definition: cab, Zone: ZoneDiscard},
+		{InstanceID: "p2_d3", OwnerID: "p2", Definition: cab, Zone: ZoneDiscard},
+		{InstanceID: "p2_d4_keep", OwnerID: "p2", Definition: cab, Zone: ZoneDiscard},
+	}
+	p2HandBefore := len(p2.Hand)
+
+	// End P1's turn -> P2's turn starts -> P2 draws 1 card for turn, then Demoledor (left) prompts P2 to choose 3 cards from Discard!
+	p1.Board[ZoneCombat] = nil
+	p1.Board[ZoneRoad] = nil
+	if err := gs.EndTurn("p1"); err != nil {
+		t.Fatalf("EndTurn p1 failed: %v", err)
+	}
+	if gs.Phase != PhaseAwaitingInput || gs.PendingPrompt == nil || gs.PendingPrompt.SourceCardID != "p2_demoledor" || !gs.PendingPrompt.MultiSelect {
+		t.Fatalf("expected MultiSelect prompt for Demoledor de basura at start of P2 turn, got phase=%s prompt=%+v", gs.Phase, gs.PendingPrompt)
+	}
+	if err := gs.SubmitPromptTargets("p2", "", []string{"p2_d1", "p2_d2", "p2_d3"}); err != nil {
+		t.Fatalf("SubmitPromptTargets for Demoledor failed: %v", err)
+	}
+	if len(p2.Discard) != 1 || p2.Discard[0].InstanceID != "p2_d4_keep" {
+		t.Fatalf("expected only p2_d4_keep to remain in P2 Discard, got %+v", p2.Discard)
+	}
+	// p2_watcher (to the right of Demoledor) should have evaluated its ConditionCardLeftDiscardThisTurn AFTER Demoledor resolved, drawing +1 extra card!
+	if len(p2.Hand) != p2HandBefore+gs.Rules.DrawPerTurn+1 {
+		t.Fatalf("expected P2 hand to increase by DrawPerTurn + 1 (deferred conditional trigger), got %d -> %d", p2HandBefore, len(p2.Hand))
+	}
+}

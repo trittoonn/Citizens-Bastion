@@ -446,11 +446,16 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
   const selectedHandCard = useMemo(
     () =>
       view.you.hand?.find((c) => c.instanceId === selectedHandCardId) ||
+      (view.you.leader &&
+      view.you.leader.instanceId === selectedHandCardId &&
+      !view.you.leader.faceDown
+        ? view.you.leader
+        : null) ||
       view.you.discard?.find(
         (c) => c.instanceId === selectedHandCardId && c.definition.playFromDiscard
       ) ||
       null,
-    [view.you.hand, view.you.discard, selectedHandCardId]
+    [view.you.hand, view.you.leader, view.you.discard, selectedHandCardId]
   );
 
   const playableFromDiscardCards = useMemo(
@@ -475,6 +480,7 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
 
   const isOffBoardPrompt = useMemo(() => {
     if (!isPromptForMe || !view.pendingPrompt) return false;
+    if (view.pendingPrompt.promptType === 'zone') return false;
     const zones = view.pendingPrompt.targetZones || [];
     return (
       zones.includes('deck') ||
@@ -804,30 +810,92 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
 
             {/* ===============================================================
                 FLOATING EVENT / DECRETO SHOWCASE WHEN AN EVENT CARD IS PLAYED
+                OR WHILE AN EVENT IS RESOLVING (VISIBLE TO BOTH PLAYERS)
                =============================================================== */}
             {activeStep &&
-              activeStep.event.type === 'PLAY_EVENT' &&
-              activeStep.event.cardDefinition && (
-                <div
-                  key={`event_${activeStep.event.seq}`}
-                  className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center bg-black/35 backdrop-blur-[1px]"
-                >
-                  <div className="anim-card-summon flex flex-col items-center gap-2 p-4 rounded-xl bg-gradient-to-b from-[#2b2118]/95 to-[#14100c]/95 border-2 border-[#f3d46b] shadow-[0_20px_50px_rgba(0,0,0,0.95)]">
-                    <div className="font-display text-xs font-bold uppercase tracking-widest text-[#f3d46b] flex items-center gap-1.5">
-                      <Flame className="w-4 h-4 text-[#f87171]" />
-                      Efecto Activado por {activeStep.event.actorName}
-                    </div>
-                    <CardView
-                      card={activeStep.event.cardDefinition}
-                      vitalityMode={view.rules.vitalityMode}
-                      size="md"
-                    />
+            activeStep.event.type === 'PLAY_EVENT' &&
+            activeStep.event.cardDefinition ? (
+              <div
+                key={`event_${activeStep.event.seq}`}
+                className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center bg-black/35 backdrop-blur-[1px]"
+              >
+                <div className="anim-card-summon flex flex-col items-center gap-2 p-4 rounded-xl bg-gradient-to-b from-[#2b2118]/95 to-[#14100c]/95 border-2 border-[#f3d46b] shadow-[0_20px_50px_rgba(0,0,0,0.95)]">
+                  <div className="font-display text-xs font-bold uppercase tracking-widest text-[#f3d46b] flex items-center gap-1.5">
+                    <Flame className="w-4 h-4 text-[#f87171]" />
+                    Evento Jugado por {activeStep.event.actorName}
                   </div>
+                  <CardView
+                    card={activeStep.event.cardDefinition}
+                    vitalityMode={view.rules.vitalityMode}
+                    size="md"
+                  />
                 </div>
-              )}
+              </div>
+            ) : view.activeEvent ? (
+              <div
+                key={`active_event_${view.activeEvent.card.id}`}
+                className="pointer-events-none absolute right-3 top-12 z-40 flex flex-col items-center gap-1.5 p-3 rounded-xl bg-gradient-to-b from-[#2b2118]/95 to-[#14100c]/95 border-2 border-[#f3d46b] shadow-[0_20px_50px_rgba(0,0,0,0.95)]"
+              >
+                <div className="font-display text-[10px] font-bold uppercase tracking-widest text-[#f3d46b] flex items-center gap-1.5">
+                  <Flame className="w-3.5 h-3.5 text-[#f87171] animate-pulse" />
+                  <span>
+                    Evento en Resolución ({view.activeEvent.actorName})
+                  </span>
+                </div>
+                {view.activeEvent.promptText && (
+                  <div className="font-serif text-[11px] text-[#fef08a] text-center max-w-[200px] leading-tight">
+                    {view.activeEvent.promptText}
+                  </div>
+                )}
+                <CardView
+                  card={view.activeEvent.card}
+                  vitalityMode={view.rules.vitalityMode}
+                  size="md"
+                />
+              </div>
+            ) : null}
 
             {/* OPPONENT 3 ROWS (City -> Road -> Combat) */}
-            <div className="flex-1 min-h-0 grid grid-rows-3 gap-1 relative z-10">
+            <div className="flex-1 min-h-0 flex gap-1 relative z-10">
+              {/* Opponent Leader Zone */}
+              <div className="w-24 shrink-0 rounded bg-[#16120e] border-2 border-[#574c3f] flex flex-col items-center justify-center p-1 relative shadow-inner">
+                <span className="font-display font-bold text-[9px] uppercase tracking-wider text-[#a89b8c] mb-1">
+                  Líder Rival
+                </span>
+                {view.opponent?.leader ? (
+                  <div className="flex flex-col items-center">
+                    {view.opponent.leader.faceDown ? (
+                      <div className="w-14 h-20 rounded bg-[#2b1212] border-2 border-[#ef4444]/60 flex flex-col items-center justify-center p-1 text-center shadow-lg">
+                        <Skull className="w-5 h-5 text-[#fca5a5] mb-1" />
+                        <span className="font-display text-[8px] font-bold uppercase text-[#fca5a5] leading-tight">
+                          Caído en Batalla
+                        </span>
+                      </div>
+                    ) : (
+                      <CardView
+                        card={view.opponent.leader.definition}
+                        instance={view.opponent.leader}
+                        vitalityMode={view.rules.vitalityMode}
+                        size="board"
+                        onMouseEnter={() =>
+                          setHoveredCard({
+                            card: view.opponent!.leader!.definition,
+                            instance: view.opponent!.leader,
+                          })
+                        }
+                        onMouseLeave={() => setHoveredCard(null)}
+                      />
+                    )}
+                  </div>
+                ) : (
+                  <div className="text-center px-1 font-serif text-[10px] text-[#786a5d] italic">
+                    En Batalla
+                  </div>
+                )}
+              </div>
+
+              {/* 3 Opponent Rows */}
+              <div className="flex-1 min-h-0 grid grid-rows-3 gap-1">
               {(
                 [
                   { id: 'city', label: 'La Ciudad', subtitle: 'Baluarte Enemigo' },
@@ -883,9 +951,29 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
                       </span>
                     </div>
 
-                    {/* Units in Row (overflow-visible so shields, Zzz badges & hover/anim glows are never clipped!) */}
-                    <div className="flex-1 flex items-center justify-center gap-2.5 overflow-visible px-2 py-1 relative z-10">
-                      {cards.map((inst) => {
+                    {/* Units in Row */}
+                    <div className="flex-1 flex items-center justify-center gap-1.5 overflow-visible px-2 py-1 relative z-10">
+                      {/* Insertion slot at index 0 for Spy */}
+                      {canPlaySpyHere && selectedHandCard && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            sendAction({
+                              type: 'PLAY_CARD',
+                              cardInstanceId: selectedHandCard.instanceId,
+                              targetZone: zone.id,
+                              targetIndex: 0,
+                            });
+                          }}
+                          className="w-5 h-12 rounded border border-dashed border-[#f3d46b] bg-[#f3d46b]/20 hover:bg-[#f3d46b]/40 text-[#f3d46b] flex items-center justify-center text-xs font-bold shrink-0 transition"
+                          title="Infiltrar al inicio (posición 0)"
+                        >
+                          +
+                        </button>
+                      )}
+
+                      {cards.map((inst, cardIdx) => {
                         const isPromptTarget =
                           !isAnimatingMultiStep &&
                           isPromptForMe &&
@@ -897,34 +985,53 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
                         const isTargetable = isPromptTarget || isAttackTarget;
 
                         return (
-                          <CardView
-                            key={inst.instanceId}
-                            card={inst.definition}
-                            instance={inst}
-                            vitalityMode={view.rules.vitalityMode}
-                            size="board"
-                            isTargetable={isTargetable}
-                            animEffect={getCardAnimEffect(inst)}
-                            onMouseEnter={() =>
-                              setHoveredCard({ card: inst.definition, instance: inst })
-                            }
-                            onMouseLeave={() => setHoveredCard(null)}
-                            onClick={() => {
-                              if (isAnimatingMultiStep) return;
-                              if (isPromptTarget) {
-                                sendAction({
-                                  type: 'SELECT_TARGET',
-                                  targetCardId: inst.instanceId,
-                                });
-                              } else if (isAttackTarget && selectedBoardCard) {
-                                sendAction({
-                                  type: 'ATTACK',
-                                  attackerId: selectedBoardCard.instanceId,
-                                  defenderId: inst.instanceId,
-                                });
+                          <React.Fragment key={inst.instanceId}>
+                            <CardView
+                              card={inst.definition}
+                              instance={inst}
+                              vitalityMode={view.rules.vitalityMode}
+                              size="board"
+                              isTargetable={isTargetable}
+                              animEffect={getCardAnimEffect(inst)}
+                              onMouseEnter={() =>
+                                setHoveredCard({ card: inst.definition, instance: inst })
                               }
-                            }}
-                          />
+                              onMouseLeave={() => setHoveredCard(null)}
+                              onClick={() => {
+                                if (isAnimatingMultiStep) return;
+                                if (isPromptTarget) {
+                                  sendAction({
+                                    type: 'SELECT_TARGET',
+                                    targetCardId: inst.instanceId,
+                                  });
+                                } else if (isAttackTarget && selectedBoardCard) {
+                                  sendAction({
+                                    type: 'ATTACK',
+                                    attackerId: selectedBoardCard.instanceId,
+                                    defenderId: inst.instanceId,
+                                  });
+                                }
+                              }}
+                            />
+                            {canPlaySpyHere && selectedHandCard && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  sendAction({
+                                    type: 'PLAY_CARD',
+                                    cardInstanceId: selectedHandCard.instanceId,
+                                    targetZone: zone.id,
+                                    targetIndex: cardIdx + 1,
+                                  });
+                                }}
+                                className="w-5 h-12 rounded border border-dashed border-[#f3d46b] bg-[#f3d46b]/20 hover:bg-[#f3d46b]/40 text-[#f3d46b] flex items-center justify-center text-xs font-bold shrink-0 transition"
+                                title={`Infiltrar aquí (posición ${cardIdx + 1})`}
+                              >
+                                +
+                              </button>
+                            )}
+                          </React.Fragment>
                         );
                       })}
                     </div>
@@ -943,6 +1050,7 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
                   </div>
                 );
               })}
+              </div>
             </div>
 
             {/* ===============================================================
@@ -1042,7 +1150,77 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
             </div>
 
             {/* PLAYER 3 ROWS (Combat -> Road -> City) */}
-            <div className="flex-1 min-h-0 grid grid-rows-3 gap-1 relative z-10">
+            <div className="flex-1 min-h-0 flex gap-1 relative z-10">
+              {/* Player Leader Zone */}
+              <div
+                onClick={() => {
+                  if (
+                    view.phase === 'MAIN' &&
+                    view.isYourTurn &&
+                    view.you.leader &&
+                    !view.you.leader.faceDown
+                  ) {
+                    setSelectedBoardCardId(null);
+                    setSelectedHandCardId((prev) =>
+                      prev === view.you.leader?.instanceId ? null : view.you.leader?.instanceId || null
+                    );
+                  }
+                }}
+                className={`w-24 shrink-0 rounded bg-[#16120e] border-2 p-1 flex flex-col items-center justify-center relative shadow-inner transition ${
+                  view.you.leader && !view.you.leader.faceDown
+                    ? selectedHandCardId === view.you.leader.instanceId
+                      ? 'border-[#f3d46b] ring-2 ring-[#f3d46b] bg-[#231a10]'
+                      : 'border-[#c59b27] hover:border-[#fef08a] cursor-pointer'
+                    : 'border-[#574c3f]'
+                }`}
+              >
+                <span className="font-display font-bold text-[9px] uppercase tracking-wider text-[#f3d46b] mb-1">
+                  Tu Líder
+                </span>
+                {view.you.leader ? (
+                  <div className="flex flex-col items-center">
+                    {view.you.leader.faceDown ? (
+                      <div className="w-14 h-20 rounded bg-[#2b1212] border-2 border-[#ef4444]/60 flex flex-col items-center justify-center p-1 text-center shadow-lg">
+                        <Skull className="w-5 h-5 text-[#fca5a5] mb-1" />
+                        <span className="font-display text-[8px] font-bold uppercase text-[#fca5a5] leading-tight">
+                          Caído en Batalla
+                        </span>
+                      </div>
+                    ) : (
+                      <>
+                        <CardView
+                          card={view.you.leader.definition}
+                          instance={view.you.leader}
+                          vitalityMode={view.rules.vitalityMode}
+                          size="board"
+                          isSelected={selectedHandCardId === view.you.leader.instanceId}
+                          onMouseEnter={() =>
+                            setHoveredCard({
+                              card: view.you.leader!.definition,
+                              instance: view.you.leader,
+                            })
+                          }
+                          onMouseLeave={() => setHoveredCard(null)}
+                        />
+                        {view.phase === 'MAIN' && view.isYourTurn && (
+                          <span className="mt-1 font-display text-[8px] text-[#fef08a] font-bold uppercase">
+                            {selectedHandCardId === view.you.leader.instanceId
+                              ? 'Listo para desplegar'
+                              : 'Clic para jugar'}
+                          </span>
+                        )}
+                      </>
+                    )}
+                  </div>
+                ) : (
+                  <div className="text-center px-1 font-serif text-[10px] text-[#786a5d] italic">
+                    En Batalla
+                  </div>
+                )}
+              </div>
+
+              {/* 3 Player Rows */}
+              <div className="flex-1 min-h-0 grid grid-rows-3 gap-1">
               {(
                 [
                   { id: 'combat', label: 'Zona de Combate', subtitle: 'Tu Vanguardia' },
@@ -1056,17 +1234,29 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
                   view.you.id,
                   zone.id
                 );
+                const isPromptZoneTarget =
+                  !isAnimatingMultiStep &&
+                  isPromptForMe &&
+                  view.pendingPrompt?.promptType === 'zone' &&
+                  view.pendingPrompt.validTargetIds?.includes(zone.id);
                 const canPlayHere =
                   !isAnimatingMultiStep && canPlaySelectedCitizenInZone(zone.id);
                 const canMoveHere =
                   !isAnimatingMultiStep && canMoveSelectedCitizenToZone(zone.id);
-                const isInteractiveRow = canPlayHere || canMoveHere;
+                const isInteractiveRow = isPromptZoneTarget || canPlayHere || canMoveHere;
 
                 return (
                   <div
                     key={zone.id}
                     onClick={() => {
                       if (isAnimatingMultiStep) return;
+                      if (isPromptZoneTarget) {
+                        sendAction({
+                          type: 'SELECT_TARGET',
+                          targetCardId: zone.id,
+                        });
+                        return;
+                      }
                       if (canPlayHere && selectedHandCard) {
                         sendAction({
                           type: 'PLAY_CARD',
@@ -1101,9 +1291,44 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
                       </span>
                     </div>
 
-                    {/* Units in Row (overflow-visible so shields, Zzz badges & hover/anim glows are never clipped!) */}
-                    <div className="flex-1 flex items-center justify-center gap-2.5 overflow-visible px-2 py-1 relative z-10">
-                      {cards.map((inst) => {
+                    {/* Units in Row with Insertion Slots */}
+                    <div className="flex-1 flex items-center justify-center gap-1.5 overflow-visible px-2 py-1 relative z-10">
+                      {/* Insertion slot at index 0 */}
+                      {(isPromptZoneTarget || (canPlayHere && selectedHandCard) || (canMoveHere && selectedBoardCard)) && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (isPromptZoneTarget) {
+                              sendAction({
+                                type: 'SELECT_TARGET',
+                                targetCardId: zone.id,
+                                targetIndex: 0,
+                              });
+                            } else if (canPlayHere && selectedHandCard) {
+                              sendAction({
+                                type: 'PLAY_CARD',
+                                cardInstanceId: selectedHandCard.instanceId,
+                                targetZone: zone.id,
+                                targetIndex: 0,
+                              });
+                            } else if (canMoveHere && selectedBoardCard) {
+                              sendAction({
+                                type: 'MOVE_CITIZEN',
+                                cardInstanceId: selectedBoardCard.instanceId,
+                                targetZone: zone.id,
+                                targetIndex: 0,
+                              });
+                            }
+                          }}
+                          className="w-5 h-12 rounded border border-dashed border-[#f3d46b] bg-[#f3d46b]/20 hover:bg-[#f3d46b]/40 text-[#f3d46b] flex items-center justify-center text-xs font-bold shrink-0 transition"
+                          title="Ubicar al inicio (posición 0)"
+                        >
+                          +
+                        </button>
+                      )}
+
+                      {cards.map((inst, cardIdx) => {
                         const isPromptTarget =
                           !isAnimatingMultiStep &&
                           isPromptForMe &&
@@ -1113,61 +1338,100 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
                           selectedBoardCardId === inst.instanceId;
 
                         return (
-                          <CardView
-                            key={inst.instanceId}
-                            card={inst.definition}
-                            instance={inst}
-                            vitalityMode={view.rules.vitalityMode}
-                            size="board"
-                            isSelected={isSelected}
-                            isTargetable={isPromptTarget}
-                            animEffect={getCardAnimEffect(inst)}
-                            canAttack={
-                              !isAnimatingMultiStep &&
-                              view.phase === 'MAIN' &&
-                              view.isYourTurn &&
-                              zone.id === 'combat'
-                            }
-                            canMove={
-                              !isAnimatingMultiStep &&
-                              view.phase === 'MAIN' &&
-                              view.isYourTurn &&
-                              !inst.playedThisTurn &&
-                              !inst.movedThisTurn
-                            }
-                            onMouseEnter={() =>
-                              setHoveredCard({ card: inst.definition, instance: inst })
-                            }
-                            onMouseLeave={() => setHoveredCard(null)}
-                            onClick={() => {
-                              if (isAnimatingMultiStep) return;
-                              if (isPromptTarget) {
-                                sendAction({
-                                  type: 'SELECT_TARGET',
-                                  targetCardId: inst.instanceId,
-                                });
-                                return;
+                          <React.Fragment key={inst.instanceId}>
+                            <CardView
+                              card={inst.definition}
+                              instance={inst}
+                              vitalityMode={view.rules.vitalityMode}
+                              size="board"
+                              isSelected={isSelected}
+                              isTargetable={isPromptTarget}
+                              animEffect={getCardAnimEffect(inst)}
+                              canAttack={
+                                !isAnimatingMultiStep &&
+                                view.phase === 'MAIN' &&
+                                view.isYourTurn &&
+                                zone.id === 'combat'
                               }
-                              if (view.phase === 'MAIN' && view.isYourTurn) {
-                                setSelectedHandCardId(null);
-                                setSelectedBoardCardId((prev) =>
-                                  prev === inst.instanceId ? null : inst.instanceId
-                                );
+                              canMove={
+                                !isAnimatingMultiStep &&
+                                view.phase === 'MAIN' &&
+                                view.isYourTurn &&
+                                !inst.playedThisTurn &&
+                                !inst.movedThisTurn
                               }
-                            }}
-                          />
+                              onMouseEnter={() =>
+                                setHoveredCard({ card: inst.definition, instance: inst })
+                              }
+                              onMouseLeave={() => setHoveredCard(null)}
+                              onClick={() => {
+                                if (isAnimatingMultiStep) return;
+                                if (isPromptTarget) {
+                                  sendAction({
+                                    type: 'SELECT_TARGET',
+                                    targetCardId: inst.instanceId,
+                                  });
+                                  return;
+                                }
+                                if (view.phase === 'MAIN' && view.isYourTurn) {
+                                  setSelectedHandCardId(null);
+                                  setSelectedBoardCardId((prev) =>
+                                    prev === inst.instanceId ? null : inst.instanceId
+                                  );
+                                }
+                              }}
+                            />
+                            {(isPromptZoneTarget || (canPlayHere && selectedHandCard) || (canMoveHere && selectedBoardCard)) && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (isPromptZoneTarget) {
+                                    sendAction({
+                                      type: 'SELECT_TARGET',
+                                      targetCardId: zone.id,
+                                      targetIndex: cardIdx + 1,
+                                    });
+                                  } else if (canPlayHere && selectedHandCard) {
+                                    sendAction({
+                                      type: 'PLAY_CARD',
+                                      cardInstanceId: selectedHandCard.instanceId,
+                                      targetZone: zone.id,
+                                      targetIndex: cardIdx + 1,
+                                    });
+                                  } else if (canMoveHere && selectedBoardCard) {
+                                    sendAction({
+                                      type: 'MOVE_CITIZEN',
+                                      cardInstanceId: selectedBoardCard.instanceId,
+                                      targetZone: zone.id,
+                                      targetIndex: cardIdx + 1,
+                                    });
+                                  }
+                                }}
+                                className="w-5 h-12 rounded border border-dashed border-[#f3d46b] bg-[#f3d46b]/20 hover:bg-[#f3d46b]/40 text-[#f3d46b] flex items-center justify-center text-xs font-bold shrink-0 transition"
+                                title={`Ubicar aquí (posición ${cardIdx + 1})`}
+                              >
+                                +
+                              </button>
+                            )}
+                          </React.Fragment>
                         );
                       })}
                     </div>
 
                     {/* Action Indicator on Right */}
                     <div className="w-36 shrink-0 flex justify-end relative z-10">
-                      {canPlayHere && selectedHandCard && (
+                      {isPromptZoneTarget && (
+                        <span className="btn-war-gold px-2.5 py-0.5 rounded text-[10px] animate-pulse">
+                          🎯 Elegir esta fila
+                        </span>
+                      )}
+                      {!isPromptZoneTarget && canPlayHere && selectedHandCard && (
                         <span className="btn-war-gold px-2.5 py-0.5 rounded text-[10px]">
                           + Desplegar aquí
                         </span>
                       )}
-                      {canMoveHere && selectedBoardCard && (
+                      {!isPromptZoneTarget && canMoveHere && selectedBoardCard && (
                         <span className="btn-war-iron border-[#f3d46b] px-2.5 py-0.5 rounded text-[10px] flex items-center gap-1">
                           <Move className="w-3 h-3 text-[#f3d46b]" /> Marchar aquí
                         </span>
@@ -1176,6 +1440,7 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
                   </div>
                 );
               })}
+              </div>
             </div>
           </div>
 
@@ -2142,19 +2407,35 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
                       ? 'Desmarcar todas'
                       : 'Seleccionar todas'}
                   </button>
-                  <button
-                    type="button"
-                    disabled={submitting}
-                    onClick={() =>
-                      sendAction({
-                        type: 'SELECT_TARGET',
-                        cardInstanceIds: [],
-                      })
-                    }
-                    className="btn-war-iron px-3 py-1.5 rounded text-xs"
-                  >
-                    No descartar ninguna (0)
-                  </button>
+                  {view.pendingPrompt.allowSacrificeFallback ? (
+                    <button
+                      type="button"
+                      disabled={submitting}
+                      onClick={() =>
+                        sendAction({
+                          type: 'SELECT_TARGET',
+                          cardInstanceIds: [],
+                        })
+                      }
+                      className="btn-war-iron px-3 py-1.5 rounded text-xs text-[#fca5a5] border-[#f87171]/50 hover:bg-[#7f1d1d]/40"
+                    >
+                      💀 Sacrificar esta carta en su lugar
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={submitting}
+                      onClick={() =>
+                        sendAction({
+                          type: 'SELECT_TARGET',
+                          cardInstanceIds: [],
+                        })
+                      }
+                      className="btn-war-iron px-3 py-1.5 rounded text-xs"
+                    >
+                      No descartar ninguna (0)
+                    </button>
+                  )}
                   <button
                     type="button"
                     disabled={submitting}
@@ -2212,7 +2493,11 @@ export const GameBoardView: React.FC<GameBoardViewProps> = ({
                                 : 'bg-[#26211d] text-[#a89b8c]'
                             }`}
                           >
-                            {isChosen ? '✓ DESCARTAR' : 'CONSERVAR EN MANO'}
+                            {isChosen
+                              ? '✓ SELECCIONADA'
+                              : view.pendingPrompt?.allowSacrificeFallback
+                              ? 'ELEGIR PARA TRITURAR'
+                              : 'CONSERVAR EN MANO'}
                           </div>
                         ) : (
                           <div className="btn-war-gold text-[10px] text-center py-1 rounded-sm">

@@ -1,18 +1,58 @@
-import React, { useState } from 'react';
-import { Plus, Trash2, X, Sparkles } from 'lucide-react';
+import React, { useRef, useState } from 'react';
+import { Plus, Trash2, Upload, X, Sparkles } from 'lucide-react';
 import {
   Ability,
   CardDefinition,
   CardType,
   EffectOpType,
   EffectStep,
+  PLANET_COLORS,
   TargetOwner,
   TargetRequirement,
+  TargetRule,
   TriggerType,
   ZoneID,
 } from '../types/game';
 import { generateCardDescription } from '../services/storage';
 import { CardView } from './CardView';
+
+/**
+ * Target presets following the official wording:
+ * - "enemigo" = enemy Citizens only.
+ * - "carta/s enemiga/s" = enemy Citizens and Tools.
+ * - "cualquier objetivo" = any damageable card (Citizens and Tools, allied or enemy).
+ */
+type TargetPreset =
+  | 'enemy_citizen'
+  | 'enemy_card'
+  | 'self_citizen'
+  | 'self_card'
+  | 'any_target'
+  | 'any_citizen';
+
+function targetPresetOf(target?: TargetRule): TargetPreset {
+  const owner: TargetOwner = target?.owner || 'enemy';
+  const citizenOnly = target?.cardType === 'citizen';
+  if (owner === 'self') return citizenOnly ? 'self_citizen' : 'self_card';
+  if (owner === 'any') return citizenOnly ? 'any_citizen' : 'any_target';
+  return citizenOnly || !target ? 'enemy_citizen' : 'enemy_card';
+}
+
+function applyTargetPreset(target: TargetRule, preset: TargetPreset): TargetRule {
+  const owner: TargetOwner = preset.startsWith('self')
+    ? 'self'
+    : preset.startsWith('any')
+      ? 'any'
+      : 'enemy';
+  const citizenOnly = preset.endsWith('citizen');
+  return {
+    ...target,
+    owner,
+    cardType: citizenOnly ? 'citizen' : '',
+    excludeCardType: citizenOnly ? '' : 'event',
+    onlyLocations: citizenOnly ? false : target.onlyLocations,
+  };
+}
 
 interface CardCreatorModalProps {
   initialCard?: CardDefinition | null;
@@ -203,11 +243,31 @@ export const CardCreatorModal: React.FC<CardCreatorModalProps> = ({
   onSave,
 }) => {
   const isEditing = Boolean(initialCard);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [name, setName] = useState(() => initialCard?.name || '');
   const [type, setType] = useState<CardType>(() => initialCard?.type || 'citizen');
+  const [subtype, setSubtype] = useState(() => {
+    if (initialCard?.subtype) return initialCard.subtype;
+    if (initialCard?.isLocation) return 'Locación';
+    if (initialCard?.isCommander) return 'Comandante';
+    return '';
+  });
+  const [planet, setPlanet] = useState(() => initialCard?.planet || 'General / Bastión');
+  const [borderColor, setBorderColor] = useState(
+    () =>
+      initialCard?.borderColor ||
+      (initialCard?.planet && PLANET_COLORS[initialCard.planet]) ||
+      PLANET_COLORS['General / Bastión']
+  );
   const [vitality, setVitality] = useState(() =>
     initialCard && initialCard.vitality > 0 ? initialCard.vitality : 5
   );
+  const [armor, setArmor] = useState(() => {
+    if (initialCard?.type === 'tool') {
+      return initialCard.armor || initialCard.vitality || 5;
+    }
+    return initialCard?.armor || 0;
+  });
   const [isSpy, setIsSpy] = useState(() => Boolean(initialCard?.isSpy));
   const [hasShield, setHasShield] = useState(() => Boolean(initialCard?.hasShield));
   const [isDefender, setIsDefender] = useState(() => Boolean(initialCard?.isDefender));
@@ -238,12 +298,68 @@ export const CardCreatorModal: React.FC<CardCreatorModalProps> = ({
     const auto = generateCardDescription(initialCard.abilities || [], {
       isSpy: Boolean(initialCard.isSpy),
       hasShield: Boolean(initialCard.hasShield),
+      isDefender: Boolean(initialCard.isDefender),
+      hasQuickAttack: Boolean(initialCard.hasQuickAttack),
+      hasReach: Boolean(initialCard.hasReach),
+      isCommander: Boolean(initialCard.isCommander),
+      isLocation: Boolean(initialCard.isLocation),
       playFromDiscard: Boolean(initialCard.playFromDiscard),
     });
     return initialCard.description && initialCard.description !== auto
       ? initialCard.description
       : '';
   });
+
+  const handlePlanetSelect = (nextPlanet: string) => {
+    setPlanet(nextPlanet);
+    if (PLANET_COLORS[nextPlanet]) {
+      setBorderColor(PLANET_COLORS[nextPlanet]);
+    }
+  };
+
+  const handleSubtypeChange = (val: string) => {
+    setSubtype(val);
+    if (val.trim().toLowerCase() === 'locación' || val.trim().toLowerCase() === 'locacion') {
+      setIsLocation(true);
+    }
+  };
+
+  const handleImageFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      const img = new Image();
+      img.onload = () => {
+        const maxW = 520;
+        const maxH = 390;
+        let w = img.width;
+        let h = img.height;
+        if (w > maxW || h > maxH) {
+          const ratio = Math.min(maxW / w, maxH / h);
+          w = Math.round(w * ratio);
+          h = Math.round(h * ratio);
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, w, h);
+          const compressed = canvas.toDataURL('image/jpeg', 0.85);
+          setArtImageUrl(compressed);
+        } else {
+          setArtImageUrl(dataUrl);
+        }
+      };
+      img.onerror = () => {
+        setArtImageUrl(dataUrl);
+      };
+      img.src = dataUrl;
+    };
+    reader.readAsDataURL(file);
+  };
 
   const handleTypeChange = (nextType: CardType) => {
     setType(nextType);
@@ -256,6 +372,7 @@ export const CardCreatorModal: React.FC<CardCreatorModalProps> = ({
     } else {
       if (nextType === 'tool') {
         setIsSpy(false);
+        if (armor <= 0) setArmor(vitality > 0 ? vitality : 5);
       }
       setAbilities((prev) =>
         prev.map((a) =>
@@ -280,9 +397,26 @@ export const CardCreatorModal: React.FC<CardCreatorModalProps> = ({
     setAbilities((prev) => prev.filter((_, i) => i !== abIdx));
   };
 
+  const updateAbility = (abIdx: number, patch: Partial<Ability>) => {
+    setAbilities((prev) =>
+      prev.map((ab, i) => (i === abIdx ? { ...ab, ...patch } : ab))
+    );
+  };
+
   const updateTrigger = (abIdx: number, trigger: TriggerType) => {
     setAbilities((prev) =>
-      prev.map((ab, i) => (i === abIdx ? { ...ab, trigger } : ab))
+      prev.map((ab, i) =>
+        i === abIdx
+          ? {
+              ...ab,
+              trigger,
+              wearCost:
+                trigger === 'activated_wear' && (!ab.wearCost || ab.wearCost <= 0)
+                  ? 2
+                  : ab.wearCost,
+            }
+          : ab
+      )
     );
   };
 
@@ -319,6 +453,12 @@ export const CardCreatorModal: React.FC<CardCreatorModalProps> = ({
     );
   };
 
+  const effectiveIsLocation =
+    type === 'tool' &&
+    (isLocation ||
+      subtype.trim().toLowerCase() === 'locación' ||
+      subtype.trim().toLowerCase() === 'locacion');
+
   const autoDescription = generateCardDescription(abilities, {
     isSpy: type === 'citizen' ? isSpy : false,
     hasShield: type !== 'event' ? hasShield : false,
@@ -326,7 +466,7 @@ export const CardCreatorModal: React.FC<CardCreatorModalProps> = ({
     hasQuickAttack: type === 'citizen' ? hasQuickAttack : false,
     hasReach: type === 'citizen' ? hasReach : false,
     isCommander: type === 'citizen' ? isCommander : false,
-    isLocation: type === 'tool' ? isLocation : false,
+    isLocation: effectiveIsLocation,
     playFromDiscard,
   });
   const finalDescription = customDescription.trim() || autoDescription;
@@ -335,7 +475,21 @@ export const CardCreatorModal: React.FC<CardCreatorModalProps> = ({
     id: initialCard?.id || 'preview_card',
     name: name.trim() || 'Nueva Carta',
     type,
-    vitality: type === 'citizen' || type === 'tool' ? Math.max(1, vitality) : 0,
+    subtype: subtype.trim() || (effectiveIsLocation ? 'Locación' : undefined),
+    planet: planet.trim() || 'General / Bastión',
+    borderColor: borderColor || undefined,
+    vitality:
+      type === 'citizen'
+        ? Math.max(1, vitality)
+        : type === 'tool'
+        ? Math.max(1, armor)
+        : 0,
+    armor:
+      type === 'tool'
+        ? Math.max(1, armor)
+        : type === 'citizen' && armor > 0
+        ? armor
+        : undefined,
     description: finalDescription,
     abilities,
     ...(type === 'citizen' && isSpy ? { isSpy: true } : {}),
@@ -344,7 +498,7 @@ export const CardCreatorModal: React.FC<CardCreatorModalProps> = ({
     ...(type === 'citizen' && hasQuickAttack ? { hasQuickAttack: true } : {}),
     ...(type === 'citizen' && hasReach ? { hasReach: true } : {}),
     ...(type === 'citizen' && isCommander ? { isCommander: true } : {}),
-    ...(type === 'tool' && isLocation ? { isLocation: true } : {}),
+    ...(effectiveIsLocation ? { isLocation: true } : {}),
     ...(playFromDiscard ? { playFromDiscard: true } : {}),
     isCustom: true,
     artColor,
@@ -443,22 +597,154 @@ export const CardCreatorModal: React.FC<CardCreatorModalProps> = ({
               </div>
             </div>
 
-            {(type === 'citizen' || type === 'tool') && (
+            {/* Subtype & Planet + Border Color */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-xl bg-slate-950/80 border border-slate-800">
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  {type === 'tool' ? 'Armadura (A)' : 'Vitalidad (V)'}:{' '}
-                  <span className="text-amber-400 font-bold">
-                    {vitality}
-                    {type === 'tool' ? 'A' : 'V'}
+                  Subtipo de Carta (Opcional)
+                </label>
+                <input
+                  type="text"
+                  placeholder={
+                    type === 'tool'
+                      ? 'Ej. Locación, Artefacto, Estructura'
+                      : type === 'citizen'
+                      ? 'Ej. Soldado, Robot, Zombi'
+                      : 'Ej. Táctica, Sabotaje, Tecnología'
+                  }
+                  value={subtype}
+                  onChange={(e) => handleSubtypeChange(e.target.value)}
+                  className="w-full px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-xs text-white focus:border-amber-500 focus:outline-none"
+                />
+                <div className="flex items-center gap-1 flex-wrap mt-1.5">
+                  {(type === 'tool'
+                    ? ['Locación', 'Artefacto', 'Estructura', 'Arma']
+                    : type === 'citizen'
+                    ? ['Soldado', 'Robot', 'Zombi', 'Mercenario', 'Comandante']
+                    : ['Táctica', 'Tecnología', 'Sabotaje']
+                  ).map((chip) => (
+                    <button
+                      type="button"
+                      key={chip}
+                      onClick={() => handleSubtypeChange(chip)}
+                      className={`px-2 py-0.5 rounded text-[10px] font-semibold border transition ${
+                        subtype === chip
+                          ? 'bg-amber-500/25 border-amber-400 text-amber-200'
+                          : 'bg-slate-900 border-slate-700 text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      {chip}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Planeta y Color del Borde (Sincronizado)
+                </label>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={
+                      ['General / Bastión', 'Plutonio', 'Vapor'].includes(planet)
+                        ? planet
+                        : 'custom'
+                    }
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val !== 'custom') {
+                        handlePlanetSelect(val);
+                      }
+                    }}
+                    className="flex-1 px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-xs text-white focus:border-amber-500 focus:outline-none"
+                  >
+                    <option value="General / Bastión">General / Bastión</option>
+                    <option value="Plutonio">Plutonio</option>
+                    <option value="Vapor">Vapor</option>
+                    <option value="custom">Personalizado...</option>
+                  </select>
+
+                  <label
+                    title="Color del borde y del Planeta"
+                    className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-slate-900 border border-slate-700 cursor-pointer"
+                  >
+                    <input
+                      type="color"
+                      value={borderColor || '#38bdf8'}
+                      onChange={(e) => setBorderColor(e.target.value)}
+                      className="w-6 h-5 rounded cursor-pointer bg-transparent border-0"
+                    />
+                    <span className="text-[10px] font-mono text-slate-300">
+                      {borderColor}
+                    </span>
+                  </label>
+                </div>
+                {!['General / Bastión', 'Plutonio', 'Vapor'].includes(planet) && (
+                  <input
+                    type="text"
+                    placeholder="Nombre del Planeta..."
+                    value={planet}
+                    onChange={(e) => setPlanet(e.target.value)}
+                    className="mt-1.5 w-full px-2.5 py-1 rounded bg-slate-950 border border-slate-700 text-xs text-white"
+                  />
+                )}
+              </div>
+            </div>
+
+            {/* Vitality (V — Arriba Izquierda) & Armor (A — Abajo Izquierda) */}
+            {type === 'citizen' && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-xl bg-slate-950/80 border border-slate-800">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    Vitalidad (V — Arriba a la izquierda):{' '}
+                    <span className="text-amber-400 font-bold">{vitality}V</span>
+                  </label>
+                  <input
+                    type="range"
+                    min={1}
+                    max={20}
+                    value={vitality}
+                    onChange={(e) => setVitality(Number(e.target.value))}
+                    className="w-full accent-amber-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    Armadura (A — Abajo a la izquierda):{' '}
+                    <span className="text-sky-300 font-bold">{armor}A</span>
+                  </label>
+                  <input
+                    type="range"
+                    min={0}
+                    max={20}
+                    value={armor}
+                    onChange={(e) => setArmor(Number(e.target.value))}
+                    className="w-full accent-sky-400"
+                  />
+                  <span className="block text-[10px] text-slate-400">
+                    La Armadura (A) en un Ciudadano absorbe daño antes que su Vitalidad (V).
                   </span>
+                </div>
+              </div>
+            )}
+
+            {type === 'tool' && (
+              <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800">
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Armadura (A — Abajo a la izquierda):{' '}
+                  <span className="text-sky-300 font-bold">{armor}A</span>
                 </label>
                 <input
                   type="range"
                   min={1}
                   max={20}
-                  value={vitality}
-                  onChange={(e) => setVitality(Number(e.target.value))}
-                  className="w-full accent-amber-500"
+                  value={armor}
+                  onChange={(e) => {
+                    const val = Number(e.target.value);
+                    setArmor(val);
+                    setVitality(val);
+                  }}
+                  className="w-full accent-sky-400"
                 />
               </div>
             )}
@@ -547,8 +833,13 @@ export const CardCreatorModal: React.FC<CardCreatorModalProps> = ({
                   <label className="flex items-center gap-2 p-2 rounded-lg bg-slate-900/90 border border-slate-800 cursor-pointer hover:border-amber-500/50">
                     <input
                       type="checkbox"
-                      checked={isLocation}
-                      onChange={(e) => setIsLocation(e.target.checked)}
+                      checked={effectiveIsLocation}
+                      onChange={(e) => {
+                        setIsLocation(e.target.checked);
+                        if (e.target.checked && !subtype) {
+                          setSubtype('Locación');
+                        }
+                      }}
                       className="accent-amber-500"
                     />
                     <span className="text-slate-200 font-semibold">
@@ -592,64 +883,97 @@ export const CardCreatorModal: React.FC<CardCreatorModalProps> = ({
               </div>
             </div>
 
-            {/* Color & Icon Pickers */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Color de Facción / Arte
-                </label>
-                <div className="flex items-center gap-2 flex-wrap">
-                  {COLOR_OPTIONS.map((c) => (
-                    <button
-                      type="button"
-                      key={c}
-                      onClick={() => setArtColor(c)}
-                      style={{ backgroundColor: c }}
-                      className={`w-6 h-6 rounded-full border-2 transition ${
-                        artColor === c ? 'border-white scale-110' : 'border-transparent opacity-75'
-                      }`}
-                    />
-                  ))}
+            {/* Color, Base Art & Local Image Upload */}
+            <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800 space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    Color de Facción / Arte
+                  </label>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {COLOR_OPTIONS.map((c) => (
+                      <button
+                        type="button"
+                        key={c}
+                        onClick={() => setArtColor(c)}
+                        style={{ backgroundColor: c }}
+                        className={`w-6 h-6 rounded-full border-2 transition ${
+                          artColor === c ? 'border-white scale-110' : 'border-transparent opacity-75'
+                        }`}
+                      />
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    Ilustración TCG Base
+                  </label>
+                  <select
+                    value={artIcon}
+                    onChange={(e) => setArtIcon(e.target.value)}
+                    className="w-full px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-xs text-white"
+                  >
+                    {ICON_OPTIONS.map((ic) => (
+                      <option key={ic} value={ic}>
+                        {ic.toUpperCase()}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Ilustración TCG Base
+              <div className="space-y-1.5">
+                <label className="block text-xs font-semibold text-slate-300">
+                  Arte de la Carta (Subir desde tu Computadora o URL)
                 </label>
-                <select
-                  value={artIcon}
-                  onChange={(e) => setArtIcon(e.target.value)}
-                  className="w-full px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-xs text-white"
-                >
-                  {ICON_OPTIONS.map((ic) => (
-                    <option key={ic} value={ic}>
-                      {ic.toUpperCase()}
-                    </option>
-                  ))}
-                </select>
+                <div className="flex flex-wrap items-center gap-2">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={handleImageFileUpload}
+                    className="hidden"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/50 text-amber-200 text-xs font-semibold"
+                  >
+                    <Upload className="w-3.5 h-3.5" /> Subir Imagen desde mi Computadora
+                  </button>
+                  {artImageUrl && (
+                    <button
+                      type="button"
+                      onClick={() => setArtImageUrl('')}
+                      className="px-2.5 py-1.5 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/40 text-rose-300 text-xs"
+                    >
+                      Quitar imagen personalizada
+                    </button>
+                  )}
+                </div>
+                <input
+                  type="text"
+                  placeholder="https://ejemplo.com/ilustracion-carta.jpg (o subí un archivo arriba)"
+                  value={artImageUrl.startsWith('data:') ? 'Imagen local cargada' : artImageUrl}
+                  readOnly={artImageUrl.startsWith('data:')}
+                  onChange={(e) => setArtImageUrl(e.target.value)}
+                  className="w-full px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-xs text-white focus:border-amber-500 focus:outline-none"
+                />
               </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">
-                URL de Imagen Personalizada (Opcional — estilo MTG/YuGiOh)
-              </label>
-              <input
-                type="url"
-                placeholder="https://ejemplo.com/ilustracion-carta.jpg (o dejá vacío para usar arte integrado)"
-                value={artImageUrl}
-                onChange={(e) => setArtImageUrl(e.target.value)}
-                className="w-full px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-xs text-white focus:border-amber-500 focus:outline-none"
-              />
             </div>
 
             {/* Abilities Section */}
             <div className="border-t border-slate-800 pt-4">
               <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-bold text-amber-400">
-                  Habilidades y Efectos ({abilities.length})
-                </h3>
+                <div>
+                  <h3 className="text-sm font-bold text-amber-400">
+                    Habilidades, Desgaste y Efectos Condicionales ({abilities.length})
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    Cada habilidad incluye su propia fila de Desgaste, Condiciones de activación y pasos encadenados.
+                  </p>
+                </div>
                 <button
                   type="button"
                   onClick={addAbility}
@@ -665,7 +989,8 @@ export const CardCreatorModal: React.FC<CardCreatorModalProps> = ({
                     key={abIdx}
                     className="p-3.5 rounded-xl bg-slate-950/90 border border-slate-800 space-y-3"
                   >
-                    <div className="flex items-center justify-between gap-2">
+                    {/* Row 1: Trigger & Actions */}
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
                       <div className="flex items-center gap-2">
                         <span className="text-xs font-semibold text-slate-400">
                           Disparador:
@@ -712,6 +1037,111 @@ export const CardCreatorModal: React.FC<CardCreatorModalProps> = ({
                       </div>
                     </div>
 
+                    {/* Row 2: Dedicated Desgaste (Wear Cost) & Once Per Turn Row */}
+                    {type !== 'event' && (
+                      <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-amber-300">
+                            ⚙️ Desgaste (Costo de V/A al activarse):
+                          </span>
+                          <input
+                            type="number"
+                            min={0}
+                            max={15}
+                            value={ab.wearCost || 0}
+                            onChange={(e) =>
+                              updateAbility(abIdx, {
+                                wearCost: Math.max(0, Number(e.target.value)),
+                              })
+                            }
+                            className="w-16 px-2 py-0.5 rounded bg-slate-950 border border-slate-700 text-white"
+                          />
+                          <span className="text-[11px] text-slate-400">
+                            (0 = sin desgaste)
+                          </span>
+                        </div>
+                        {ab.trigger === 'activated_wear' && (
+                          <label className="flex items-center gap-1.5 text-slate-300 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={Boolean(ab.oncePerTurn ?? true)}
+                              onChange={(e) =>
+                                updateAbility(abIdx, { oncePerTurn: e.target.checked })
+                              }
+                              className="accent-amber-500"
+                            />
+                            <span>1 vez por turno</span>
+                          </label>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Row 3: Dedicated Conditional Ability Row */}
+                    <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800 space-y-2 text-xs">
+                      <span className="block font-semibold text-sky-300">
+                        🔍 Condiciones para que se active esta Habilidad (Opcional):
+                      </span>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <label className="flex items-center gap-2 text-slate-300 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(ab.conditionAlliedDiedThisTurn)}
+                            onChange={(e) =>
+                              updateAbility(abIdx, {
+                                conditionAlliedDiedThisTurn: e.target.checked,
+                              })
+                            }
+                            className="accent-sky-400"
+                          />
+                          <span>Si un Ciudadano aliado murió este turno</span>
+                        </label>
+                        <label className="flex items-center gap-2 text-slate-300 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(ab.conditionCardLeftDiscardThisTurn)}
+                            onChange={(e) =>
+                              updateAbility(abIdx, {
+                                conditionCardLeftDiscardThisTurn: e.target.checked,
+                              })
+                            }
+                            className="accent-sky-400"
+                          />
+                          <span>Si una carta salió de tu Descarte este turno</span>
+                        </label>
+                        <label className="flex items-center gap-2 text-slate-300 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(ab.conditionEnemyMorePoints)}
+                            onChange={(e) =>
+                              updateAbility(abIdx, {
+                                conditionEnemyMorePoints: e.target.checked,
+                              })
+                            }
+                            className="accent-sky-400"
+                          />
+                          <span>Si el oponente tiene más Puntos de Desarrollo</span>
+                        </label>
+                        <div className="flex items-center gap-2 text-slate-300">
+                          <span>Mín. Ciudadanos en tu Descarte:</span>
+                          <input
+                            type="number"
+                            min={0}
+                            max={15}
+                            value={ab.conditionDiscardMinCitizens || 0}
+                            onChange={(e) =>
+                              updateAbility(abIdx, {
+                                conditionDiscardMinCitizens: Math.max(
+                                  0,
+                                  Number(e.target.value)
+                                ),
+                              })
+                            }
+                            className="w-14 px-2 py-0.5 rounded bg-slate-950 border border-slate-700 text-white"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
                     {/* Steps inside this ability */}
                     <div className="space-y-2.5 pl-2 border-l-2 border-slate-800">
                       {ab.steps.map((step, stepIdx) => (
@@ -736,12 +1166,12 @@ export const CardCreatorModal: React.FC<CardCreatorModalProps> = ({
                               <option value="exile_and_summon_by_v">Triturar del Descarte y Convocar por Suma de V</option>
                               <option value="draw_cards">Levantar Cartas del Mazo</option>
                               <option value="discard_cards">Descartar Carta de tu Mano</option>
-                              <option value="cycle_hand">Reciclar Mano (Descartar todo y robar igual)</option>
+                              <option value="cycle_hand">Reciclar Mano (Elegir cartas a descartar y robar igual)</option>
                               <option value="summon_self">Convocar esta carta desde el Descarte</option>
                               <option value="mill_or_sacrifice">Triturar X del Descarte o Sacrificar esta carta</option>
-                              <option value="move_zone">Mover Carta entre Zonas (Buscar/Recuperar)</option>
-                              <option value="destroy">Destruir / Sacrificar Ciudadano</option>
-                              <option value="modify_stat">Modificar Vitalidad (+V / Curar)</option>
+                              <option value="move_zone">Mover Carta entre Zonas (Buscar/Recuperar/Reanimar)</option>
+                              <option value="destroy">Destruir / Sacrificar Carta</option>
+                              <option value="modify_stat">Modificar Vitalidad (+V) o Armadura (+A)</option>
                             </select>
 
                             {ab.steps.length > 1 && (
@@ -759,25 +1189,107 @@ export const CardCreatorModal: React.FC<CardCreatorModalProps> = ({
                           {(step.op === 'deal_damage' ||
                             step.op === 'draw_cards' ||
                             step.op === 'modify_stat' ||
-                            step.op === 'mill_or_sacrifice') && (
+                            step.op === 'mill_or_sacrifice' ||
+                            step.op === 'exile_and_summon_by_v') && (
                             <div className="flex items-center gap-3 flex-wrap text-xs">
-                              <label className="text-slate-400">
-                                {step.op === 'mill_or_sacrifice'
-                                  ? 'Cartas a triturar del Descarte:'
-                                  : 'Cantidad:'}
+                              {!step.useStoredVitality && !step.scaleByDiscardCitizens && (
+                                <label className="text-slate-400">
+                                  {step.op === 'mill_or_sacrifice' ||
+                                  step.op === 'exile_and_summon_by_v'
+                                    ? 'Cartas a triturar del Descarte:'
+                                    : 'Cantidad:'}
+                                  <input
+                                    type="number"
+                                    min={step.op === 'modify_stat' ? -10 : 1}
+                                    max={20}
+                                    value={
+                                      step.amount ??
+                                      (step.op === 'mill_or_sacrifice' ||
+                                      step.op === 'exile_and_summon_by_v'
+                                        ? 3
+                                        : 1)
+                                    }
+                                    onChange={(e) =>
+                                      updateStep(abIdx, stepIdx, {
+                                        ...step,
+                                        amount: Number(e.target.value),
+                                      })
+                                    }
+                                    className="ml-1.5 w-16 px-2 py-0.5 rounded bg-slate-950 border border-slate-700 text-white"
+                                  />
+                                </label>
+                              )}
+
+                              {step.op === 'modify_stat' && (
+                                <label className="text-slate-400 flex items-center gap-1.5">
+                                  <span>Estadística:</span>
+                                  <select
+                                    value={step.statTarget || 'vitality'}
+                                    onChange={(e) =>
+                                      updateStep(abIdx, stepIdx, {
+                                        ...step,
+                                        statTarget: e.target.value as 'vitality' | 'armor',
+                                      })
+                                    }
+                                    className="px-2 py-0.5 rounded bg-slate-950 border border-slate-700 text-white"
+                                  >
+                                    <option value="vitality">Vitalidad (V)</option>
+                                    <option value="armor">Armadura (A)</option>
+                                  </select>
+                                </label>
+                              )}
+
+                              {(step.op === 'deal_damage' || step.op === 'modify_stat') && (
+                                <label className="flex items-center gap-1.5 text-amber-200 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={Boolean(step.useStoredVitality)}
+                                    onChange={(e) =>
+                                      updateStep(abIdx, stepIdx, {
+                                        ...step,
+                                        useStoredVitality: e.target.checked,
+                                      })
+                                    }
+                                    className="accent-amber-400"
+                                  />
+                                  <span>Usar V guardada del paso anterior</span>
+                                </label>
+                              )}
+
+                              {step.op === 'modify_stat' && (
+                                <label className="flex items-center gap-1.5 text-amber-200 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={Boolean(step.scaleByDiscardCitizens)}
+                                    onChange={(e) =>
+                                      updateStep(abIdx, stepIdx, {
+                                        ...step,
+                                        scaleByDiscardCitizens: e.target.checked,
+                                      })
+                                    }
+                                    className="accent-amber-400"
+                                  />
+                                  <span>+1 por cada Ciudadano en tu Descarte</span>
+                                </label>
+                              )}
+                            </div>
+                          )}
+
+                          {step.op === 'discard_cards' && (
+                            <div className="flex items-center gap-3 flex-wrap text-xs">
+                              <label className="flex items-center gap-1.5 text-amber-200 cursor-pointer">
                                 <input
-                                  type="number"
-                                  min={step.op === 'modify_stat' ? -10 : 1}
-                                  max={20}
-                                  value={step.amount ?? (step.op === 'mill_or_sacrifice' ? 3 : 1)}
+                                  type="checkbox"
+                                  checked={Boolean(step.storeTargetCardType)}
                                   onChange={(e) =>
                                     updateStep(abIdx, stepIdx, {
                                       ...step,
-                                      amount: Number(e.target.value),
+                                      storeTargetCardType: e.target.checked,
                                     })
                                   }
-                                  className="ml-1.5 w-16 px-2 py-0.5 rounded bg-slate-950 border border-slate-700 text-white"
+                                  className="accent-amber-400"
                                 />
+                                <span>Guardar tipo de carta descartada (para el siguiente paso)</span>
                               </label>
                             </div>
                           )}
@@ -883,6 +1395,7 @@ export const CardCreatorModal: React.FC<CardCreatorModalProps> = ({
                                     className="w-full px-2 py-1 rounded bg-slate-950 border border-slate-700 text-white"
                                   >
                                     <option value="same_row">Esta misma fila</option>
+                                    <option value="any_row">En cualquier fila (a elección)</option>
                                     <option value="city">La Ciudad</option>
                                     <option value="road">El Camino</option>
                                     <option value="combat">Zona de Combate</option>
@@ -1014,129 +1527,313 @@ export const CardCreatorModal: React.FC<CardCreatorModalProps> = ({
                                   </div>
                                 </div>
                               </div>
+
+                              <div className="flex flex-wrap items-center gap-3 pt-1">
+                                <label className="flex items-center gap-1.5 text-amber-200 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={Boolean(step.scaleCountByAlliedDeathsThisTurn)}
+                                    onChange={(e) =>
+                                      updateStep(abIdx, stepIdx, {
+                                        ...step,
+                                        scaleCountByAlliedDeathsThisTurn: e.target.checked,
+                                      })
+                                    }
+                                    className="accent-amber-400"
+                                  />
+                                  <span>Convocar 1 por cada aliado muerto este turno</span>
+                                </label>
+                                <label className="flex items-center gap-1.5 text-amber-200 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={Boolean(step.useStoredVitality)}
+                                    onChange={(e) =>
+                                      updateStep(abIdx, stepIdx, {
+                                        ...step,
+                                        useStoredVitality: e.target.checked,
+                                      })
+                                    }
+                                    className="accent-amber-400"
+                                  />
+                                  <span>Vitalidad igual a la V guardada</span>
+                                </label>
+                              </div>
                             </div>
                           )}
 
                           {(step.op === 'deal_damage' ||
                             step.op === 'destroy' ||
                             step.op === 'modify_stat') && (
-                            <div className="grid grid-cols-2 gap-2 text-xs">
-                              <div>
-                                <span className="text-slate-400 block">Alcance</span>
-                                <select
-                                  value={step.target?.requirement || 'single_card'}
-                                  onChange={(e) =>
-                                    updateStep(abIdx, stepIdx, {
-                                      ...step,
-                                      target: {
-                                        ...(step.target || {}),
-                                        requirement: e.target.value as TargetRequirement,
-                                      },
-                                    })
-                                  }
-                                  className="w-full px-2 py-1 rounded bg-slate-950 border border-slate-700 text-white"
-                                >
-                                  <option value="single_card">1 Objetivo a elección</option>
-                                  <option value="all_matching">Todos los que coincidan</option>
-                                  {type !== 'event' && (
-                                    <>
-                                      <option value="right_neighbor">
-                                        Ciudadano a la derecha de esta carta
-                                      </option>
-                                      <option value="self_card">Esta misma carta</option>
-                                    </>
+                            <div className="space-y-2 text-xs">
+                              <div className="grid grid-cols-2 gap-2">
+                                <div>
+                                  <span className="text-slate-400 block">Alcance</span>
+                                  <select
+                                    value={step.target?.requirement || 'single_card'}
+                                    onChange={(e) =>
+                                      updateStep(abIdx, stepIdx, {
+                                        ...step,
+                                        target: {
+                                          ...(step.target || {}),
+                                          requirement: e.target.value as TargetRequirement,
+                                        },
+                                      })
+                                    }
+                                    className="w-full px-2 py-1 rounded bg-slate-950 border border-slate-700 text-white"
+                                  >
+                                    <option value="single_card">1 Objetivo a elección</option>
+                                    <option value="all_matching">Todos los que coincidan</option>
+                                    <option value="weakest_enemy">Enemigo con menor V</option>
+                                    {type !== 'event' && (
+                                      <>
+                                        <option value="right_neighbor">
+                                          Ciudadano a la derecha de esta carta
+                                        </option>
+                                        <option value="self_card">Esta misma carta</option>
+                                      </>
+                                    )}
+                                  </select>
+                                </div>
+                                {step.target?.requirement !== 'self_card' &&
+                                  step.target?.requirement !== 'right_neighbor' && (
+                                    <div>
+                                      <span className="text-slate-400 block">Tipo de objetivo</span>
+                                      <select
+                                        value={targetPresetOf(step.target)}
+                                        onChange={(e) =>
+                                          updateStep(abIdx, stepIdx, {
+                                            ...step,
+                                            target: applyTargetPreset(
+                                              step.target || { requirement: 'single_card' },
+                                              e.target.value as TargetPreset,
+                                            ),
+                                          })
+                                        }
+                                        className="w-full px-2 py-1 rounded bg-slate-950 border border-slate-700 text-white"
+                                      >
+                                        <option value="enemy_citizen">Enemigo (Ciudadano rival)</option>
+                                        <option value="enemy_card">
+                                          Carta enemiga (Ciudadano o Herramienta rival)
+                                        </option>
+                                        <option value="self_citizen">Ciudadano aliado</option>
+                                        <option value="self_card">Carta aliada (Ciudadano o Herramienta)</option>
+                                        <option value="any_target">
+                                          Cualquier objetivo (Ciudadano o Herramienta)
+                                        </option>
+                                        <option value="any_citizen">Cualquier Ciudadano</option>
+                                      </select>
+                                    </div>
                                   )}
-                                </select>
                               </div>
-                              {step.target?.requirement !== 'self_card' &&
-                                step.target?.requirement !== 'right_neighbor' && (
-                                  <div>
-                                    <span className="text-slate-400 block">Controlador objetivo</span>
-                                    <select
-                                      value={step.target?.owner || 'enemy'}
+
+                              <div className="flex flex-wrap items-center gap-3 pt-1">
+                                {step.target?.requirement === 'single_card' && (
+                                  <label className="flex items-center gap-1.5 text-slate-300 cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      checked={Boolean(step.target?.random)}
                                       onChange={(e) =>
                                         updateStep(abIdx, stepIdx, {
                                           ...step,
                                           target: {
                                             ...(step.target || { requirement: 'single_card' }),
-                                            owner: e.target.value as TargetOwner,
+                                            random: e.target.checked,
                                           },
                                         })
                                       }
-                                      className="w-full px-2 py-1 rounded bg-slate-950 border border-slate-700 text-white"
-                                    >
-                                      <option value="enemy">Enemigo</option>
-                                      <option value="self">Propio (Aliado)</option>
-                                      <option value="any">Cualquiera</option>
-                                    </select>
-                                  </div>
+                                      className="accent-amber-400"
+                                    />
+                                    <span>Al azar (si no, el jugador elige)</span>
+                                  </label>
                                 )}
+                                {step.op === 'modify_stat' && (
+                                  <label className="flex items-center gap-1.5 text-amber-200 cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      checked={Boolean(step.modifyBaseVitality)}
+                                      onChange={(e) =>
+                                        updateStep(abIdx, stepIdx, {
+                                          ...step,
+                                          modifyBaseVitality: e.target.checked,
+                                        })
+                                      }
+                                      className="accent-amber-400"
+                                    />
+                                    <span>Cambia la V base permanentemente</span>
+                                  </label>
+                                )}
+                              </div>
+
+                              {step.op === 'destroy' && (
+                                <div className="flex flex-wrap items-center gap-3 pt-1">
+                                  <label className="flex items-center gap-1.5 text-amber-200 cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      checked={Boolean(step.storeVictimVitality)}
+                                      onChange={(e) =>
+                                        updateStep(abIdx, stepIdx, {
+                                          ...step,
+                                          storeVictimVitality: e.target.checked,
+                                        })
+                                      }
+                                      className="accent-amber-400"
+                                    />
+                                    <span>Guardar V de la víctima</span>
+                                  </label>
+                                  <label className="flex items-center gap-1.5 text-amber-200 cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      checked={Boolean(step.grantSelfShieldOnSuccess)}
+                                      onChange={(e) =>
+                                        updateStep(abIdx, stepIdx, {
+                                          ...step,
+                                          grantSelfShieldOnSuccess: e.target.checked,
+                                        })
+                                      }
+                                      className="accent-amber-400"
+                                    />
+                                    <span>Si destruye, esta carta gana Escudo</span>
+                                  </label>
+                                  <label className="flex items-center gap-1.5 text-slate-300 cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      checked={Boolean(step.target?.onlyLocations)}
+                                      onChange={(e) =>
+                                        updateStep(abIdx, stepIdx, {
+                                          ...step,
+                                          target: {
+                                            ...(step.target || { requirement: 'single_card' }),
+                                            onlyLocations: e.target.checked,
+                                            cardType: e.target.checked ? 'tool' : 'citizen',
+                                          },
+                                        })
+                                      }
+                                      className="accent-amber-400"
+                                    />
+                                    <span>Solo Locaciones</span>
+                                  </label>
+                                </div>
+                              )}
                             </div>
                           )}
 
                           {step.op === 'move_zone' && (
-                            <div className="grid grid-cols-3 gap-2 text-xs">
-                              <div>
-                                <span className="text-slate-400 block">Zona Origen</span>
-                                <select
-                                  value={step.target?.zones?.[0] || 'discard'}
-                                  onChange={(e) => {
-                                    const val = e.target.value;
-                                    const zones: ZoneID[] =
-                                      val === 'board'
-                                        ? ['city', 'road', 'combat']
-                                        : [val as ZoneID];
-                                    updateStep(abIdx, stepIdx, {
-                                      ...step,
-                                      shuffleDeck: val === 'deck',
-                                      target: {
-                                        ...(step.target || { requirement: 'single_card' }),
-                                        zones,
-                                      },
-                                    });
-                                  }}
-                                  className="w-full px-2 py-1 rounded bg-slate-950 border border-slate-700 text-white"
-                                >
-                                  <option value="discard">Tu Descarte</option>
-                                  <option value="deck">Tu Mazo</option>
-                                  <option value="board">El Tablero</option>
-                                </select>
+                            <div className="space-y-2 text-xs">
+                              <div className="grid grid-cols-3 gap-2">
+                                <div>
+                                  <span className="text-slate-400 block">Zona Origen</span>
+                                  <select
+                                    value={step.target?.zones?.[0] || 'discard'}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      const zones: ZoneID[] =
+                                        val === 'board'
+                                          ? ['city', 'road', 'combat']
+                                          : [val as ZoneID];
+                                      updateStep(abIdx, stepIdx, {
+                                        ...step,
+                                        shuffleDeck: val === 'deck',
+                                        target: {
+                                          ...(step.target || { requirement: 'single_card' }),
+                                          zones,
+                                        },
+                                      });
+                                    }}
+                                    className="w-full px-2 py-1 rounded bg-slate-950 border border-slate-700 text-white"
+                                  >
+                                    <option value="discard">Tu Descarte</option>
+                                    <option value="deck">Tu Mazo</option>
+                                    <option value="board">El Tablero</option>
+                                  </select>
+                                </div>
+                                <div>
+                                  <span className="text-slate-400 block">Zona Destino</span>
+                                  <select
+                                    value={step.destZone || 'hand'}
+                                    onChange={(e) =>
+                                      updateStep(abIdx, stepIdx, {
+                                        ...step,
+                                        destZone: e.target.value as ZoneID,
+                                      })
+                                    }
+                                    className="w-full px-2 py-1 rounded bg-slate-950 border border-slate-700 text-white"
+                                  >
+                                    <option value="hand">Tu Mano</option>
+                                    <option value="any_row">Jugar en cualquier fila (a elección)</option>
+                                    <option value="city">La Ciudad</option>
+                                    <option value="road">El Camino</option>
+                                    <option value="combat">Zona de Combate</option>
+                                    <option value="discard">Descarte</option>
+                                    <option value="exile">Trituradora (Exilio)</option>
+                                  </select>
+                                </div>
+                                <div>
+                                  <span className="text-slate-400 block">Dueño</span>
+                                  <select
+                                    value={step.target?.owner || 'self'}
+                                    onChange={(e) =>
+                                      updateStep(abIdx, stepIdx, {
+                                        ...step,
+                                        target: {
+                                          ...(step.target || { requirement: 'single_card' }),
+                                          owner: e.target.value as TargetOwner,
+                                        },
+                                      })
+                                    }
+                                    className="w-full px-2 py-1 rounded bg-slate-950 border border-slate-700 text-white"
+                                  >
+                                    <option value="self">Propio</option>
+                                    <option value="enemy">Enemigo</option>
+                                  </select>
+                                </div>
                               </div>
-                              <div>
-                                <span className="text-slate-400 block">Zona Destino</span>
-                                <select
-                                  value={step.destZone || 'hand'}
-                                  onChange={(e) =>
-                                    updateStep(abIdx, stepIdx, {
-                                      ...step,
-                                      destZone: e.target.value as ZoneID,
-                                    })
-                                  }
-                                  className="w-full px-2 py-1 rounded bg-slate-950 border border-slate-700 text-white"
-                                >
-                                  <option value="hand">Tu Mano</option>
-                                  <option value="discard">Descarte</option>
-                                  <option value="exile">Exilio</option>
-                                </select>
-                              </div>
-                              <div>
-                                <span className="text-slate-400 block">Dueño</span>
-                                <select
-                                  value={step.target?.owner || 'self'}
-                                  onChange={(e) =>
-                                    updateStep(abIdx, stepIdx, {
-                                      ...step,
-                                      target: {
-                                        ...(step.target || { requirement: 'single_card' }),
-                                        owner: e.target.value as TargetOwner,
-                                      },
-                                    })
-                                  }
-                                  className="w-full px-2 py-1 rounded bg-slate-950 border border-slate-700 text-white"
-                                >
-                                  <option value="self">Propio</option>
-                                  <option value="enemy">Enemigo</option>
-                                </select>
+
+                              <div className="flex flex-wrap items-center gap-3 pt-1">
+                                <label className="flex items-center gap-1.5 text-amber-200 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={Boolean(step.storeVictimVitality)}
+                                    onChange={(e) =>
+                                      updateStep(abIdx, stepIdx, {
+                                        ...step,
+                                        storeVictimVitality: e.target.checked,
+                                      })
+                                    }
+                                    className="accent-amber-400"
+                                  />
+                                  <span>Guardar V de la carta movida</span>
+                                </label>
+                                <label className="flex items-center gap-1.5 text-amber-200 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={Boolean(step.sacrificeAtTurnEnd)}
+                                    onChange={(e) =>
+                                      updateStep(abIdx, stepIdx, {
+                                        ...step,
+                                        sacrificeAtTurnEnd: e.target.checked,
+                                      })
+                                    }
+                                    className="accent-amber-400"
+                                  />
+                                  <span>Sacrificar al final del turno</span>
+                                </label>
+                                <label className="flex items-center gap-1.5 text-slate-300 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={Boolean(step.target?.matchStoredCardType)}
+                                    onChange={(e) =>
+                                      updateStep(abIdx, stepIdx, {
+                                        ...step,
+                                        target: {
+                                          ...(step.target || { requirement: 'single_card' }),
+                                          matchStoredCardType: e.target.checked,
+                                        },
+                                      })
+                                    }
+                                    className="accent-amber-400"
+                                  />
+                                  <span>Mismo tipo que carta descartada</span>
+                                </label>
                               </div>
                             </div>
                           )}

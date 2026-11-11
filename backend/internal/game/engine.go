@@ -154,6 +154,10 @@ func sanitizePlayerState(p *PlayerState, includeHand bool) SanitizedPlayerView {
 			view.Hand = append(view.Hand, c.Clone())
 		}
 	}
+	if p.Leader != nil {
+		cp := p.Leader.Clone()
+		view.Leader = &cp
+	}
 	for _, c := range p.Discard {
 		view.Discard = append(view.Discard, c.Clone())
 	}
@@ -202,9 +206,67 @@ func (g *GameState) nextInstanceID(prefix string) string {
 	return fmt.Sprintf("%s_%d", prefix, g.nextInstanceSeq)
 }
 
+func normalizeCardDef(def *CardDefinition) {
+	if def == nil {
+		return
+	}
+	if def.Subtype == "Locación" || def.Subtype == "Locacion" {
+		def.IsLocation = true
+	} else if def.IsLocation && def.Subtype == "" {
+		def.Subtype = "Locación"
+	}
+	if def.Type == CardTypeTool {
+		if def.Armor > 0 && def.Vitality <= 0 {
+			def.Vitality = def.Armor
+		} else if def.Vitality > 0 && def.Armor <= 0 {
+			def.Armor = def.Vitality
+		}
+	}
+}
+
+func (g *GameState) checkAbilityConditions(controller *PlayerState, ab Ability) bool {
+	if controller == nil {
+		return false
+	}
+	if ab.ConditionAlliedDiedThisTurn && controller.AlliedDeathsThisTurn <= 0 {
+		return false
+	}
+	if ab.ConditionCardLeftDiscardThisTurn && controller.CardsLeftDiscardThisTurn <= 0 {
+		return false
+	}
+	if ab.ConditionEnemyMorePoints {
+		_, ctrlIdx, err := g.GetPlayer(controller.ID)
+		if err != nil {
+			return false
+		}
+		opp := g.Players[1-ctrlIdx]
+		if opp == nil || opp.DevelopmentPoints <= controller.DevelopmentPoints {
+			return false
+		}
+	}
+	if ab.ConditionDiscardMinCitizens > 0 {
+		cnt := 0
+		for _, dc := range controller.Discard {
+			if dc.Definition.Type == CardTypeCitizen {
+				cnt++
+			}
+		}
+		if cnt < ab.ConditionDiscardMinCitizens {
+			return false
+		}
+	}
+	return true
+}
+
 // AddPlayer registers a player and their deck into the match.
 // When the 2nd player joins, decks are shuffled, 4 cards are drawn, and PhaseMulligan starts.
 func (g *GameState) AddPlayer(playerID, playerName string, deckDefs []CardDefinition) error {
+	normalizedDefs := make([]CardDefinition, len(deckDefs))
+	copy(normalizedDefs, deckDefs)
+	for i := range normalizedDefs {
+		normalizeCardDef(&normalizedDefs[i])
+	}
+	deckDefs = normalizedDefs
 	if g.Phase != PhaseWaitingForPlayers {
 		return fmt.Errorf("la partida ya comenzó")
 	}
@@ -239,15 +301,24 @@ func (g *GameState) AddPlayer(playerID, playerName string, deckDefs []CardDefini
 	}
 
 	for _, def := range deckDefs {
+		normalizeCardDef(&def)
 		inst := &CardInstance{
 			InstanceID:      g.nextInstanceID("card"),
 			OwnerID:         playerID,
 			Definition:      def,
 			BaseVitality:    def.Vitality,
 			CurrentVitality: def.Vitality,
+			BaseArmor:       def.Armor,
+			CurrentArmor:    def.Armor,
 			Zone:            ZoneDeck,
 		}
-		ps.Deck = append(ps.Deck, inst)
+		if def.IsCommander && ps.Leader == nil {
+			inst.Zone = ZoneLeader
+			inst.FaceDown = false
+			ps.Leader = inst
+		} else {
+			ps.Deck = append(ps.Deck, inst)
+		}
 		if g.Telemetry != nil && def.ID != "" {
 			g.Telemetry.CardNames[def.ID] = def.Name
 			g.Telemetry.CardTypes[def.ID] = def.Type
@@ -363,12 +434,13 @@ func (g *GameState) ApplyMulligan(playerID string, cardInstanceIDs []string) err
 		g.addLog(fmt.Sprintf("%s conservó su mano inicial.", p.Name))
 	}
 
-	// Move any Commander (Líder) card from Deck into Hand (Zona de Líder: visible extension of hand)
+	// Ensure any Commander (Líder) card in Deck is placed in the dedicated Leader Zone (Zona de Líder)
 	var remainingDeck []*CardInstance
 	for _, dc := range p.Deck {
-		if dc.Definition.IsCommander && len(p.Hand) < g.maxHandSize() {
-			dc.Zone = ZoneHand
-			p.Hand = append([]*CardInstance{dc}, p.Hand...)
+		if dc.Definition.IsCommander && p.Leader == nil {
+			dc.Zone = ZoneLeader
+			dc.FaceDown = false
+			p.Leader = dc
 		} else {
 			remainingDeck = append(remainingDeck, dc)
 		}
@@ -449,33 +521,69 @@ func (g *GameState) beginTurn(playerIdx int) {
 	}
 }
 
-// queueBoardTriggers collects triggers from a player's board ordered Combat -> Road -> City, right-to-left.
+// queueBoardTriggers collects triggers from a player's board ordered Combat -> Road -> City (top-to-bottom), left-to-right.
 func (g *GameState) queueBoardTriggers(controller *PlayerState, trigger TriggerType) {
 	orderedZones := []ZoneID{ZoneCombat, ZoneRoad, ZoneCity}
 	for _, z := range orderedZones {
 		row := append([]*CardInstance{}, controller.Board[z]...)
-		for i := len(row) - 1; i >= 0; i-- {
+		for i := 0; i < len(row); i++ {
 			card := row[i]
 			for _, ab := range card.Definition.Abilities {
 				if ab.Trigger != trigger {
 					continue
 				}
-				if ab.ConditionAlliedDiedThisTurn && controller.AlliedDeathsThisTurn <= 0 {
-					continue
-				}
-				if ab.ConditionCardLeftDiscardThisTurn && controller.CardsLeftDiscardThisTurn <= 0 {
-					continue
-				}
-				g.enqueueAbilityFromBoardCard(controller, card, z, ab)
+				g.enqueueDeferredBoardAbility(controller, card, z, ab)
 			}
 		}
 	}
+}
+
+func (g *GameState) enqueueDeferredBoardAbility(controller *PlayerState, card *CardInstance, zone ZoneID, ab Ability) {
+	if len(ab.Steps) == 0 {
+		return
+	}
+	g.nextAbilityGroupSeq++
+	groupID := fmt.Sprintf("abgrp_%d", g.nextAbilityGroupSeq)
+	abCopy := ab
+	for stepIdx, step := range ab.Steps {
+		qe := QueuedEffect{
+			ControllerID:    controller.ID,
+			SourceCardID:    card.InstanceID,
+			SourceCardDefID: card.Definition.ID,
+			SourceCardName:  card.Definition.Name,
+			SourceZone:      zone,
+			Step:            step,
+			AbilityGroupID:  groupID,
+		}
+		if stepIdx == 0 {
+			qe.CheckCondition = &abCopy
+		}
+		g.EffectQueue = append(g.EffectQueue, qe)
+	}
+}
+
+func insertCardInBoardRow(row []*CardInstance, card *CardInstance, placeAtStart bool, targetIndex ...int) []*CardInstance {
+	if len(targetIndex) > 0 && targetIndex[0] >= 0 && targetIndex[0] <= len(row) {
+		idx := targetIndex[0]
+		newRow := make([]*CardInstance, 0, len(row)+1)
+		newRow = append(newRow, row[:idx]...)
+		newRow = append(newRow, card)
+		newRow = append(newRow, row[idx:]...)
+		return newRow
+	}
+	if placeAtStart {
+		return append([]*CardInstance{card}, row...)
+	}
+	return append(row, card)
 }
 
 func (g *GameState) enqueueAbilityFromBoardCard(controller *PlayerState, card *CardInstance, zone ZoneID, ab Ability) {
 	destroySourceAfter := false
 	if ab.WearCost > 0 {
 		card.CurrentVitality -= ab.WearCost
+		if card.Definition.Type == CardTypeTool {
+			card.CurrentArmor = card.CurrentVitality
+		}
 		g.addLog(fmt.Sprintf("⚙️ Desgaste %d: %s (%s) pierde %d de Vitalidad/Armadura (queda en %d).", ab.WearCost, card.Definition.Name, controller.Name, ab.WearCost, card.CurrentVitality))
 		if card.CurrentVitality <= 0 {
 			destroySourceAfter = true
@@ -534,6 +642,9 @@ func (g *GameState) ActivateCardAbility(playerID, cardInstanceID string) error {
 	if foundAb.OncePerTurn && card.UsedAbilityThisTurn {
 		return fmt.Errorf("%s ya activó su habilidad en este turno", card.Definition.Name)
 	}
+	if !g.checkAbilityConditions(p, *foundAb) {
+		return fmt.Errorf("no se cumplen las condiciones para activar %s", card.Definition.Name)
+	}
 
 	// Verify valid targets before paying WearCost
 	for _, step := range foundAb.Steps {
@@ -576,8 +687,8 @@ func (g *GameState) CanPlayInCombat(playerID string) bool {
 	return len(opp.Board[ZoneCombat]) > 0
 }
 
-// PlayCard plays a card from the active player's hand (or discard if PlayFromDiscard).
-func (g *GameState) PlayCard(playerID, cardInstanceID string, targetZone ZoneID) error {
+// PlayCard plays a card from the active player's hand, Leader Zone, or discard (if PlayFromDiscard).
+func (g *GameState) PlayCard(playerID, cardInstanceID string, targetZone ZoneID, targetIndex ...int) error {
 	if g.Phase != PhaseMain {
 		return fmt.Errorf("solo podés jugar cartas en la Fase Principal")
 	}
@@ -594,6 +705,7 @@ func (g *GameState) PlayCard(playerID, cardInstanceID string, targetZone ZoneID)
 
 	handIdx := -1
 	discardIdx := -1
+	fromLeader := false
 	fromZone := ZoneHand
 	var card *CardInstance
 	for i, c := range p.Hand {
@@ -602,6 +714,14 @@ func (g *GameState) PlayCard(playerID, cardInstanceID string, targetZone ZoneID)
 			card = c
 			break
 		}
+	}
+	if card == nil && p.Leader != nil && p.Leader.InstanceID == cardInstanceID {
+		if p.Leader.FaceDown {
+			return fmt.Errorf("tu Líder ya cayó en combate y está boca abajo en la Zona de Líder")
+		}
+		card = p.Leader
+		fromLeader = true
+		fromZone = ZoneLeader
 	}
 	if card == nil {
 		for i, c := range p.Discard {
@@ -614,8 +734,9 @@ func (g *GameState) PlayCard(playerID, cardInstanceID string, targetZone ZoneID)
 		}
 	}
 	if card == nil {
-		return fmt.Errorf("la carta no está en tu mano (ni disponible en tu descarte)")
+		return fmt.Errorf("la carta no está en tu mano, Zona de Líder ni disponible en tu descarte")
 	}
+	normalizeCardDef(&card.Definition)
 
 	if card.Definition.Type == CardTypeCitizen || card.Definition.Type == CardTypeTool {
 		if !IsBoardZone(targetZone) {
@@ -635,8 +756,10 @@ func (g *GameState) PlayCard(playerID, cardInstanceID string, targetZone ZoneID)
 			return fmt.Errorf("la zona %s ya alcanzó el límite máximo de %d unidades", zoneDisplayName(targetZone), g.maxUnitsPerZone())
 		}
 
-		// Remove from Hand or Discard
-		if fromZone == ZoneHand {
+		// Remove from Hand, Leader Zone, or Discard
+		if fromLeader {
+			p.Leader = nil
+		} else if fromZone == ZoneHand {
 			p.Hand = append(p.Hand[:handIdx], p.Hand[handIdx+1:]...)
 		} else {
 			p.Discard = append(p.Discard[:discardIdx], p.Discard[discardIdx+1:]...)
@@ -645,8 +768,11 @@ func (g *GameState) PlayCard(playerID, cardInstanceID string, targetZone ZoneID)
 
 		card.OwnerID = boardOwner.ID
 		card.Zone = targetZone
+		card.FaceDown = false
 		card.BaseVitality = card.Definition.Vitality
 		card.CurrentVitality = card.Definition.Vitality
+		card.BaseArmor = card.Definition.Armor
+		card.CurrentArmor = card.Definition.Armor
 		card.PlayedThisTurn = true
 		card.MovedThisTurn = false
 		card.AttackedThisTurn = false
@@ -666,11 +792,7 @@ func (g *GameState) PlayCard(playerID, cardInstanceID string, targetZone ZoneID)
 			}
 		}
 
-		if placeAtStart {
-			boardOwner.Board[targetZone] = append([]*CardInstance{card}, boardOwner.Board[targetZone]...)
-		} else {
-			boardOwner.Board[targetZone] = append(boardOwner.Board[targetZone], card)
-		}
+		boardOwner.Board[targetZone] = insertCardInBoardRow(boardOwner.Board[targetZone], card, placeAtStart, targetIndex...)
 		g.PlaysRemaining--
 		g.MovesRemaining = g.countMovableCitizens(p)
 		g.recordTelemetryPlay(idx, card.Definition)
@@ -682,6 +804,8 @@ func (g *GameState) PlayCard(playerID, cardInstanceID string, targetZone ZoneID)
 		originNote := ""
 		if fromZone == ZoneDiscard {
 			originNote = " (desde el Descarte)"
+		} else if fromZone == ZoneLeader {
+			originNote = " (desde la Zona de Líder)"
 		}
 		if card.Definition.IsSpy {
 			g.addLog(fmt.Sprintf("%s infiltró al Espía %s (%d%s)%s en %s de %s.", p.Name, card.Definition.Name, card.CurrentVitality, statSuffix, originNote, zoneDisplayName(targetZone), boardOwner.Name))
@@ -704,7 +828,7 @@ func (g *GameState) PlayCard(playerID, cardInstanceID string, targetZone ZoneID)
 
 		// Queue "Al jugar" abilities (not triggered when summoned by an effect)
 		for _, ab := range card.Definition.Abilities {
-			if ab.Trigger == TriggerOnPlay {
+			if ab.Trigger == TriggerOnPlay && g.checkAbilityConditions(p, ab) {
 				g.enqueueAbilityFromBoardCard(p, card, targetZone, ab)
 			}
 		}
@@ -716,7 +840,7 @@ func (g *GameState) PlayCard(playerID, cardInstanceID string, targetZone ZoneID)
 
 	// Event card: verify that the first step (if mandatory target) has at least 1 valid target before consuming the card
 	for _, ab := range card.Definition.Abilities {
-		if ab.Trigger == TriggerImmediate || ab.Trigger == TriggerOnPlay {
+		if (ab.Trigger == TriggerImmediate || ab.Trigger == TriggerOnPlay) && g.checkAbilityConditions(p, ab) {
 			for stepIdx, step := range ab.Steps {
 				if step.Target.Requirement == TargetReqSingleCard {
 					if stepIdx > 0 && (step.Op == EffectDiscard || step.UseStoredVitality || step.Target.MatchStoredCardType) {
@@ -746,6 +870,12 @@ func (g *GameState) PlayCard(playerID, cardInstanceID string, targetZone ZoneID)
 	g.addLog(fmt.Sprintf("%s jugó el evento %s.", p.Name, card.Definition.Name))
 
 	defCopy := card.Definition
+	g.ActiveEvent = &ActiveEventView{
+		Card:      defCopy,
+		ActorID:   p.ID,
+		ActorName: p.Name,
+	}
+
 	g.recordAnimStep(ActionAnimationEvent{
 		Type:           AnimPlayEvent,
 		ActorID:        p.ID,
@@ -764,7 +894,7 @@ func (g *GameState) PlayCard(playerID, cardInstanceID string, targetZone ZoneID)
 	}
 
 	for _, ab := range card.Definition.Abilities {
-		if ab.Trigger == TriggerImmediate || ab.Trigger == TriggerOnPlay {
+		if (ab.Trigger == TriggerImmediate || ab.Trigger == TriggerOnPlay) && g.checkAbilityConditions(p, ab) {
 			for _, step := range ab.Steps {
 				g.EffectQueue = append(g.EffectQueue, QueuedEffect{
 					ControllerID:    p.ID,
@@ -805,7 +935,7 @@ func (g *GameState) countMovableCitizens(p *PlayerState) int {
 
 // MoveCitizen moves a Citizen that was not played this turn (and has neither moved nor attacked this turn)
 // to an immediately adjacent zone.
-func (g *GameState) MoveCitizen(playerID, cardInstanceID string, toZone ZoneID) error {
+func (g *GameState) MoveCitizen(playerID, cardInstanceID string, toZone ZoneID, targetIndex ...int) error {
 	if g.Phase != PhaseMain {
 		return fmt.Errorf("solo podés mover Ciudadanos en la Fase Principal")
 	}
@@ -843,12 +973,12 @@ func (g *GameState) MoveCitizen(playerID, cardInstanceID string, toZone ZoneID) 
 		return fmt.Errorf("la zona %s ya alcanzó el límite máximo de %d unidades", zoneDisplayName(toZone), g.maxUnitsPerZone())
 	}
 
-	// Remove from old zone and append to new zone
+	// Remove from old zone and insert into new zone
 	row := p.Board[fromZone]
 	p.Board[fromZone] = append(row[:pos], row[pos+1:]...)
 	card.Zone = toZone
 	card.MovedThisTurn = true
-	p.Board[toZone] = append(p.Board[toZone], card)
+	p.Board[toZone] = insertCardInBoardRow(p.Board[toZone], card, false, targetIndex...)
 	g.MovesRemaining = g.countMovableCitizens(p)
 
 	g.addLog(fmt.Sprintf("%s movió a %s de %s a %s.", p.Name, card.Definition.Name, zoneDisplayName(fromZone), zoneDisplayName(toZone)))
@@ -1086,17 +1216,33 @@ func (g *GameState) applyDamage(target *CardInstance, dmg int, sourceDesc string
 		g.addLog(fmt.Sprintf("🛡️ El Escudo de %s evitó %d de daño de %s y se perdió.", target.Definition.Name, dmg, sourceDesc))
 		return 0, true
 	}
+	if target.Definition.Type == CardTypeCitizen && target.CurrentArmor > 0 {
+		if dmg <= target.CurrentArmor {
+			target.CurrentArmor -= dmg
+			g.addLog(fmt.Sprintf("🛡️ La Armadura de %s absorbió %d de daño de %s (queda en %dA).", target.Definition.Name, dmg, sourceDesc, target.CurrentArmor))
+			return dmg, false
+		}
+		absorbed := target.CurrentArmor
+		rem := dmg - absorbed
+		target.CurrentArmor = 0
+		target.CurrentVitality -= rem
+		g.addLog(fmt.Sprintf("🛡️ La Armadura de %s absorbió %d de daño de %s (0A) y recibió %d de daño a la Vitalidad.", target.Definition.Name, absorbed, sourceDesc, rem))
+		return dmg, false
+	}
 	target.CurrentVitality -= dmg
+	if target.Definition.Type == CardTypeTool {
+		target.CurrentArmor = target.CurrentVitality
+	}
 	return dmg, false
 }
 
 // SubmitPromptTarget resolves a single-target PendingPrompt during PhaseAwaitingInput.
-func (g *GameState) SubmitPromptTarget(playerID, targetCardID string) error {
-	return g.SubmitPromptTargets(playerID, targetCardID, nil)
+func (g *GameState) SubmitPromptTarget(playerID, targetCardID string, targetIndex ...int) error {
+	return g.SubmitPromptTargets(playerID, targetCardID, nil, targetIndex...)
 }
 
 // SubmitPromptTargets resolves a single-target or multi-target PendingPrompt during PhaseAwaitingInput.
-func (g *GameState) SubmitPromptTargets(playerID, targetCardID string, targetCardIDs []string) error {
+func (g *GameState) SubmitPromptTargets(playerID, targetCardID string, targetCardIDs []string, targetIndex ...int) error {
 	if g.Phase != PhaseAwaitingInput || g.PendingPrompt == nil {
 		return fmt.Errorf("no hay ninguna selección pendiente")
 	}
@@ -1129,8 +1275,10 @@ func (g *GameState) SubmitPromptTargets(playerID, targetCardID string, targetCar
 			unique = append(unique, id)
 		}
 
-		if len(unique) < prompt.MinTargets || (prompt.MaxTargets > 0 && len(unique) > prompt.MaxTargets) {
-			return fmt.Errorf("cantidad de cartas seleccionadas inválida (%d)", len(unique))
+		if !(len(unique) == 0 && prompt.AllowSacrificeFallback) {
+			if len(unique) < prompt.MinTargets || (prompt.MaxTargets > 0 && len(unique) > prompt.MaxTargets) {
+				return fmt.Errorf("cantidad de cartas seleccionadas inválida (%d)", len(unique))
+			}
 		}
 
 		g.PendingPrompt = nil
@@ -1156,7 +1304,32 @@ func (g *GameState) SubmitPromptTargets(playerID, targetCardID string, targetCar
 	}
 
 	g.PendingPrompt = nil
-	g.executeEffectStepWithTarget(prompt.QueuedStep, targetCardID)
+	qe := prompt.QueuedStep
+	if prompt.PromptType == "zone" {
+		qe.ChosenZone = ZoneID(targetCardID)
+		if len(targetIndex) > 0 {
+			idxCopy := targetIndex[0]
+			qe.ChosenIndex = &idxCopy
+		}
+		g.executeEffectStepWithTargets(qe, []string{qe.ChosenTargetID})
+		g.processEffectQueue(g.ResumePhase)
+		g.bumpVersion()
+		return nil
+	}
+
+	if qe.Step.Op == EffectMoveZone && qe.Step.DestZone == ZoneAnyRow && qe.ChosenZone == "" {
+		qe.ChosenTargetID = targetCardID
+		g.EffectQueue = append([]QueuedEffect{qe}, g.EffectQueue...)
+		g.processEffectQueue(g.ResumePhase)
+		g.bumpVersion()
+		return nil
+	}
+
+	if len(targetIndex) > 0 {
+		idxCopy := targetIndex[0]
+		qe.ChosenIndex = &idxCopy
+	}
+	g.executeEffectStepWithTarget(qe, targetCardID)
 	g.processEffectQueue(g.ResumePhase)
 	g.bumpVersion()
 	return nil
@@ -1205,12 +1378,109 @@ func (g *GameState) processEffectQueue(resumePhase GamePhase) {
 		next := g.EffectQueue[0]
 		g.EffectQueue = g.EffectQueue[1:]
 
+		if next.CheckCondition != nil {
+			ctrl, _, err := g.GetPlayer(next.ControllerID)
+			if err != nil || ctrl == nil {
+				continue
+			}
+			srcCard, currentZone, _ := g.findBoardCard(ctrl, next.SourceCardID)
+			if srcCard == nil || !g.checkAbilityConditions(ctrl, *next.CheckCondition) {
+				if next.AbilityGroupID != "" {
+					filtered := make([]QueuedEffect, 0, len(g.EffectQueue))
+					for _, item := range g.EffectQueue {
+						if item.AbilityGroupID != next.AbilityGroupID {
+							filtered = append(filtered, item)
+						}
+					}
+					g.EffectQueue = filtered
+				}
+				continue
+			}
+			next.SourceZone = currentZone
+			if next.AbilityGroupID != "" {
+				for i := range g.EffectQueue {
+					if g.EffectQueue[i].AbilityGroupID == next.AbilityGroupID {
+						g.EffectQueue[i].SourceZone = currentZone
+					}
+				}
+			}
+			destroySourceAfter := false
+			if next.CheckCondition.WearCost > 0 {
+				srcCard.CurrentVitality -= next.CheckCondition.WearCost
+				if srcCard.Definition.Type == CardTypeTool {
+					srcCard.CurrentArmor = srcCard.CurrentVitality
+				}
+				g.addLog(fmt.Sprintf("⚙️ Desgaste %d: %s (%s) pierde %d de Vitalidad/Armadura (queda en %d).", next.CheckCondition.WearCost, srcCard.Definition.Name, ctrl.Name, next.CheckCondition.WearCost, srcCard.CurrentVitality))
+				if srcCard.CurrentVitality <= 0 {
+					destroySourceAfter = true
+				}
+			}
+			if destroySourceAfter {
+				marked := false
+				if next.AbilityGroupID != "" {
+					for i := len(g.EffectQueue) - 1; i >= 0; i-- {
+						if g.EffectQueue[i].AbilityGroupID == next.AbilityGroupID {
+							g.EffectQueue[i].DestroySourceCard = true
+							marked = true
+							break
+						}
+					}
+				}
+				if !marked {
+					next.DestroySourceCard = true
+				}
+			}
+			next.CheckCondition = nil
+		}
+
 		if next.Step.Op == EffectExileAndSummonByV {
 			g.handleExileAndSummonByV(next, resumePhase)
 			if g.Phase == PhaseAwaitingInput {
 				return
 			}
 			continue
+		}
+
+		if next.Step.Op == EffectMillOrSacrifice {
+			ctrl, _, err := g.GetPlayer(next.ControllerID)
+			reqCount := next.Step.Amount
+			if reqCount <= 0 {
+				reqCount = 3
+			}
+			if err == nil && ctrl != nil && len(ctrl.Discard) >= reqCount && !next.Step.Target.Random {
+				validIDs := make([]string, 0, len(ctrl.Discard))
+				clonedCandidates := make([]CardInstance, 0, len(ctrl.Discard))
+				for _, c := range ctrl.Discard {
+					validIDs = append(validIDs, c.InstanceID)
+					clonedCandidates = append(clonedCandidates, c.Clone())
+				}
+				promptText := next.Step.Target.Prompt
+				if promptText == "" {
+					promptText = fmt.Sprintf("%s: Elegí %d cartas de tu Descarte para triturar (o sacrificá esta carta).", next.SourceCardName, reqCount)
+				}
+				g.Phase = PhaseAwaitingInput
+				g.PendingPrompt = &PendingPrompt{
+					PlayerID:               next.ControllerID,
+					SourceCardID:           next.SourceCardID,
+					SourceCardName:         next.SourceCardName,
+					PromptText:             promptText,
+					PromptType:             "cards",
+					OriginPhase:            resumePhase,
+					TargetZones:            []ZoneID{ZoneDiscard},
+					TargetOwner:            TargetOwnerSelf,
+					ValidTargetIDs:         validIDs,
+					CandidateCards:         clonedCandidates,
+					MultiSelect:            true,
+					MinTargets:             reqCount,
+					MaxTargets:             reqCount,
+					AllowSacrificeFallback: true,
+					QueuedStep:             next,
+				}
+				if g.ActiveEvent != nil {
+					g.ActiveEvent.PromptText = promptText
+				}
+				return
+			}
 		}
 
 		if next.Step.Op == EffectCycleHand {
@@ -1241,6 +1511,7 @@ func (g *GameState) processEffectQueue(resumePhase GamePhase) {
 				SourceCardID:   next.SourceCardID,
 				SourceCardName: next.SourceCardName,
 				PromptText:     promptText,
+				PromptType:     "cards",
 				OriginPhase:    resumePhase,
 				TargetZones:    []ZoneID{ZoneHand},
 				TargetOwner:    TargetOwnerSelf,
@@ -1251,12 +1522,30 @@ func (g *GameState) processEffectQueue(resumePhase GamePhase) {
 				MaxTargets:     len(validIDs),
 				QueuedStep:     next,
 			}
+			if g.ActiveEvent != nil {
+				g.ActiveEvent.PromptText = promptText
+			}
 			return
 		}
 
-		if next.Step.Target.Requirement == TargetReqSingleCard {
+		// Steps that depend on a previously stored Vitality (e.g. "hace daño igual al V sacrificado")
+		// are skipped when nothing was stored (the previous sacrifice/exile step had no valid target).
+		if next.Step.UseStoredVitality && g.lastStoredVitality <= 0 && (next.Step.Op == EffectDealDamage || next.Step.Op == EffectModifyStat) {
+			g.addLog(fmt.Sprintf("%s: no hay V almacenada; el efecto no tiene impacto.", next.SourceCardName))
+			if next.DestroySourceCard {
+				if ctrl, _, _ := g.GetPlayer(next.ControllerID); ctrl != nil {
+					g.destroyBoardCard(ctrl, next.SourceCardID)
+				}
+			}
+			continue
+		}
+
+		if next.Step.Target.Requirement == TargetReqSingleCard && next.ChosenTargetID == "" {
 			candidates := g.findCandidateTargets(next.ControllerID, next.SourceCardID, next.Step.Target)
 			if len(candidates) == 0 {
+				if next.Step.StoreVictimVitality {
+					g.lastStoredVitality = 0
+				}
 				g.addLog(fmt.Sprintf("%s: sin objetivos válidos para el efecto.", next.SourceCardName))
 				if next.DestroySourceCard {
 					if ctrl, _, _ := g.GetPlayer(next.ControllerID); ctrl != nil {
@@ -1266,38 +1555,100 @@ func (g *GameState) processEffectQueue(resumePhase GamePhase) {
 				continue
 			}
 
-			validIDs := make([]string, 0, len(candidates))
-			clonedCandidates := make([]CardInstance, 0, len(candidates))
-			for _, c := range candidates {
-				validIDs = append(validIDs, c.InstanceID)
-				clonedCandidates = append(clonedCandidates, c.Clone())
-			}
+			if next.Step.Target.Random {
+				chosen := candidates[g.randIntn(len(candidates))]
+				if next.Step.Op == EffectMoveZone && next.Step.DestZone == ZoneAnyRow && next.ChosenZone == "" {
+					next.ChosenTargetID = chosen.InstanceID
+				} else {
+					g.executeEffectStepWithTarget(next, chosen.InstanceID)
+					continue
+				}
+			} else {
+				validIDs := make([]string, 0, len(candidates))
+				clonedCandidates := make([]CardInstance, 0, len(candidates))
+				for _, c := range candidates {
+					validIDs = append(validIDs, c.InstanceID)
+					clonedCandidates = append(clonedCandidates, c.Clone())
+				}
 
-			promptText := next.Step.Target.Prompt
-			if promptText == "" {
-				promptText = fmt.Sprintf("%s: Seleccioná un objetivo.", next.SourceCardName)
-			}
+				promptText := next.Step.Target.Prompt
+				if promptText == "" {
+					promptText = fmt.Sprintf("%s: Seleccioná un objetivo.", next.SourceCardName)
+				}
 
-			g.Phase = PhaseAwaitingInput
-			g.PendingPrompt = &PendingPrompt{
-				PlayerID:       next.ControllerID,
-				SourceCardID:   next.SourceCardID,
-				SourceCardName: next.SourceCardName,
-				PromptText:     promptText,
-				OriginPhase:    resumePhase,
-				TargetZones:    next.Step.Target.Zones,
-				TargetOwner:    next.Step.Target.Owner,
-				ValidTargetIDs: validIDs,
-				CandidateCards: clonedCandidates,
-				QueuedStep:     next,
+				g.Phase = PhaseAwaitingInput
+				g.PendingPrompt = &PendingPrompt{
+					PlayerID:       next.ControllerID,
+					SourceCardID:   next.SourceCardID,
+					SourceCardName: next.SourceCardName,
+					PromptText:     promptText,
+					PromptType:     "cards",
+					OriginPhase:    resumePhase,
+					TargetZones:    next.Step.Target.Zones,
+					TargetOwner:    next.Step.Target.Owner,
+					ValidTargetIDs: validIDs,
+					CandidateCards: clonedCandidates,
+					QueuedStep:     next,
+				}
+				if g.ActiveEvent != nil {
+					g.ActiveEvent.PromptText = promptText
+				}
+				return
 			}
-			return
 		}
 
-		g.executeEffectStepWithTarget(next, "")
+		if (next.Step.Op == EffectSummonToken || next.Step.Op == EffectMoveZone) && next.Step.DestZone == ZoneAnyRow && next.ChosenZone == "" {
+			ctrl, _, err := g.GetPlayer(next.ControllerID)
+			if err == nil && ctrl != nil {
+				shouldPromptZone := true
+				if next.Step.Op == EffectSummonToken {
+					if next.Step.UseStoredVitality && g.lastStoredVitality <= 0 {
+						shouldPromptZone = false
+					} else if next.Step.ScaleCountByAlliedDeathsThisTurn && ctrl.AlliedDeathsThisTurn <= 0 {
+						shouldPromptZone = false
+					}
+				}
+				if shouldPromptZone {
+					var validZoneIDs []string
+					var validZones []ZoneID
+					for _, z := range []ZoneID{ZoneCity, ZoneRoad, ZoneCombat} {
+						if len(ctrl.Board[z]) < g.maxUnitsPerZone() {
+							validZoneIDs = append(validZoneIDs, string(z))
+							validZones = append(validZones, z)
+						}
+					}
+					if len(validZoneIDs) > 0 {
+						promptText := fmt.Sprintf("%s: Elegí en qué fila del tablero colocar la unidad.", next.SourceCardName)
+						if next.Step.Op == EffectSummonToken {
+							promptText = fmt.Sprintf("%s: Elegí en qué fila convocar.", next.SourceCardName)
+						}
+						g.Phase = PhaseAwaitingInput
+						g.PendingPrompt = &PendingPrompt{
+							PlayerID:       next.ControllerID,
+							SourceCardID:   next.SourceCardID,
+							SourceCardName: next.SourceCardName,
+							PromptText:     promptText,
+							PromptType:     "zone",
+							OriginPhase:    resumePhase,
+							TargetZones:    validZones,
+							TargetOwner:    TargetOwnerSelf,
+							ValidTargetIDs: validZoneIDs,
+							QueuedStep:     next,
+						}
+						if g.ActiveEvent != nil {
+							g.ActiveEvent.PromptText = promptText
+						}
+						return
+					}
+				}
+			}
+		}
+
+		g.executeEffectStepWithTarget(next, next.ChosenTargetID)
 	}
 
 	// Queue is empty; transition to resumePhase
+	g.ActiveEvent = nil
 	g.Phase = resumePhase
 	if resumePhase == PhaseEndOfTurn {
 		g.completeEndOfTurn()
@@ -1552,7 +1903,9 @@ func (g *GameState) executeEffectStepWithTargets(qe QueuedEffect, chosenTargetID
 		}
 
 		destZone := step.DestZone
-		if destZone == ZoneSameRow || destZone == "" {
+		if IsBoardZone(qe.ChosenZone) {
+			destZone = qe.ChosenZone
+		} else if destZone == ZoneSameRow || destZone == ZoneAnyRow || destZone == "" {
 			if srcCard, currentZone, _ := g.findBoardCard(controller, qe.SourceCardID); srcCard != nil {
 				destZone = currentZone
 			} else if IsBoardZone(qe.SourceZone) {
@@ -1599,7 +1952,11 @@ func (g *GameState) executeEffectStepWithTargets(qe QueuedEffect, chosenTargetID
 				ShieldActive:     tokenDef.HasShield,
 			}
 			lastTokenID = inst.InstanceID
-			controller.Board[destZone] = append(controller.Board[destZone], inst)
+			if qe.ChosenIndex != nil {
+				controller.Board[destZone] = insertCardInBoardRow(controller.Board[destZone], inst, false, *qe.ChosenIndex+summoned)
+			} else {
+				controller.Board[destZone] = append(controller.Board[destZone], inst)
+			}
 			summoned++
 		}
 		if summoned > 0 {
@@ -1687,6 +2044,8 @@ func (g *GameState) executeEffectStepWithTargets(qe QueuedEffect, chosenTargetID
 			selfCard.Zone = destZone
 			selfCard.BaseVitality = selfCard.Definition.Vitality
 			selfCard.CurrentVitality = selfCard.Definition.Vitality
+			selfCard.BaseArmor = selfCard.Definition.Armor
+			selfCard.CurrentArmor = selfCard.Definition.Armor
 			selfCard.PlayedThisTurn = true
 			selfCard.MovedThisTurn = false
 			selfCard.AttackedThisTurn = false
@@ -1711,7 +2070,41 @@ func (g *GameState) executeEffectStepWithTargets(qe QueuedEffect, chosenTargetID
 		if reqCount <= 0 {
 			reqCount = 3
 		}
-		if len(controller.Discard) >= reqCount {
+		if len(chosenTargetIDs) >= reqCount {
+			chosenSet := make(map[string]bool, len(chosenTargetIDs))
+			for _, id := range chosenTargetIDs {
+				chosenSet[id] = true
+			}
+			var milled []*CardInstance
+			var remaining []*CardInstance
+			for _, dc := range controller.Discard {
+				if chosenSet[dc.InstanceID] && len(milled) < reqCount {
+					milled = append(milled, dc)
+				} else {
+					remaining = append(remaining, dc)
+				}
+			}
+			if len(milled) >= reqCount {
+				controller.Discard = remaining
+				controller.CardsLeftDiscardThisTurn += len(milled)
+				for _, mc := range milled {
+					mc.Zone = ZoneExile
+					controller.Exile = append(controller.Exile, mc)
+				}
+				g.addLog(fmt.Sprintf("⚙️ %s (%s) trituró %d carta(s) elegida(s) de su Descarte.", qe.SourceCardName, controller.Name, len(milled)))
+				g.recordAnimStep(ActionAnimationEvent{
+					Type:           AnimEffect,
+					ActorID:        controller.ID,
+					ActorName:      controller.Name,
+					CardInstanceID: qe.SourceCardID,
+					CardName:       qe.SourceCardName,
+					ToZone:         ZoneExile,
+					BannerText:     fmt.Sprintf("⚙️ %s tritura %d cartas del Descarte", qe.SourceCardName, len(milled)),
+				})
+				return
+			}
+		}
+		if step.Target.Random && len(controller.Discard) >= reqCount {
 			milled := controller.Discard[:reqCount]
 			controller.Discard = append([]*CardInstance{}, controller.Discard[reqCount:]...)
 			controller.CardsLeftDiscardThisTurn += reqCount
@@ -1729,25 +2122,25 @@ func (g *GameState) executeEffectStepWithTargets(qe QueuedEffect, chosenTargetID
 				ToZone:         ZoneExile,
 				BannerText:     fmt.Sprintf("⚙️ %s tritura %d cartas del Descarte", qe.SourceCardName, reqCount),
 			})
-		} else {
-			if srcCard, _, _ := g.findBoardCard(controller, qe.SourceCardID); srcCard != nil {
-				cp := srcCard.Clone()
-				cp.CurrentVitality = 0
-				g.destroyBoardCard(controller, srcCard.InstanceID)
-				g.addLog(fmt.Sprintf("💀 %s (%s) no tenía %d cartas en su Descarte para triturar y fue sacrificado.", qe.SourceCardName, controller.Name, reqCount))
-				g.recordAnimStep(ActionAnimationEvent{
-					Type:               AnimEffect,
-					ActorID:            controller.ID,
-					ActorName:          controller.Name,
-					CardInstanceID:     srcCard.InstanceID,
-					CardName:           srcCard.Definition.Name,
-					TargetCardID:       srcCard.InstanceID,
-					TargetCardName:     srcCard.Definition.Name,
-					TargetCardSnapshot: &cp,
-					Destroyed:          true,
-					BannerText:         fmt.Sprintf("💀 %s se sacrifica (faltan cartas en Descarte)", srcCard.Definition.Name),
-				})
-			}
+			return
+		}
+		if srcCard, _, _ := g.findBoardCard(controller, qe.SourceCardID); srcCard != nil {
+			cp := srcCard.Clone()
+			cp.CurrentVitality = 0
+			g.destroyBoardCard(controller, srcCard.InstanceID)
+			g.addLog(fmt.Sprintf("💀 %s (%s) no trituró %d cartas de su Descarte y fue sacrificado.", qe.SourceCardName, controller.Name, reqCount))
+			g.recordAnimStep(ActionAnimationEvent{
+				Type:               AnimEffect,
+				ActorID:            controller.ID,
+				ActorName:          controller.Name,
+				CardInstanceID:     srcCard.InstanceID,
+				CardName:           srcCard.Definition.Name,
+				TargetCardID:       srcCard.InstanceID,
+				TargetCardName:     srcCard.Definition.Name,
+				TargetCardSnapshot: &cp,
+				Destroyed:          true,
+				BannerText:         fmt.Sprintf("💀 %s se sacrifica", srcCard.Definition.Name),
+			})
 		}
 
 	case EffectDealDamage:
@@ -1842,10 +2235,11 @@ func (g *GameState) executeEffectStepWithTargets(qe QueuedEffect, chosenTargetID
 	case EffectMoveZone:
 		targets := g.resolveTargetsForExecution(qe, chosenTargetID)
 		dest := step.DestZone
-		if dest == "" {
+		if IsBoardZone(qe.ChosenZone) {
+			dest = qe.ChosenZone
+		} else if dest == "" {
 			dest = ZoneHand
-		}
-		if dest == ZoneSameRow {
+		} else if dest == ZoneSameRow || dest == ZoneAnyRow {
 			if srcCard, currentZone, _ := g.findBoardCard(controller, qe.SourceCardID); srcCard != nil {
 				dest = currentZone
 			} else if IsBoardZone(qe.SourceZone) {
@@ -1866,7 +2260,11 @@ func (g *GameState) executeEffectStepWithTargets(qe QueuedEffect, chosenTargetID
 				}
 				g.lastStoredVitality += v
 			}
-			g.moveCardToZone(ownerPlayer, t.InstanceID, dest)
+			if qe.ChosenIndex != nil {
+				g.moveCardToZone(ownerPlayer, t.InstanceID, dest, *qe.ChosenIndex)
+			} else {
+				g.moveCardToZone(ownerPlayer, t.InstanceID, dest)
+			}
 			if step.SacrificeAtTurnEnd {
 				t.SacrificeAtTurnEnd = true
 			}
@@ -1908,9 +2306,42 @@ func (g *GameState) executeEffectStepWithTargets(qe QueuedEffect, chosenTargetID
 			if ownerPlayer == nil {
 				continue
 			}
+			if step.StatTarget == "armor" && t.Definition.Type == CardTypeCitizen {
+				t.CurrentArmor += delta
+				if t.CurrentArmor < 0 {
+					t.CurrentArmor = 0
+				}
+				if delta > 0 && t.CurrentArmor > t.BaseArmor {
+					t.BaseArmor = t.CurrentArmor
+				}
+				g.addLog(fmt.Sprintf("%s (%s) modificó la Armadura de %s en %+d (ahora %dA).", qe.SourceCardName, controller.Name, t.Definition.Name, delta, t.CurrentArmor))
+				g.recordAnimStep(ActionAnimationEvent{
+					Type:           AnimEffect,
+					ActorID:        controller.ID,
+					ActorName:      controller.Name,
+					CardInstanceID: qe.SourceCardID,
+					CardName:       qe.SourceCardName,
+					TargetCardID:   t.InstanceID,
+					TargetCardName: t.Definition.Name,
+					Amount:         delta,
+					BannerText:     fmt.Sprintf("🛡️ %s (%s) modifica la Armadura de %s (%+dA)", qe.SourceCardName, controller.Name, t.Definition.Name, delta),
+				})
+				continue
+			}
 			t.CurrentVitality += delta
-			if delta > 0 && t.CurrentVitality > t.BaseVitality {
-				t.BaseVitality = t.CurrentVitality
+			if step.ModifyBaseVitality {
+				t.Definition.Vitality += delta
+				if t.Definition.Vitality < 0 {
+					t.Definition.Vitality = 0
+				}
+				t.BaseVitality = t.Definition.Vitality
+			}
+			if t.Definition.Type == CardTypeTool {
+				t.CurrentArmor = t.CurrentVitality
+				if step.ModifyBaseVitality {
+					t.Definition.Armor = t.Definition.Vitality
+					t.BaseArmor = t.BaseVitality
+				}
 			}
 			g.addLog(fmt.Sprintf("%s (%s) modificó la Vitalidad de %s en %+d (ahora %dV).", qe.SourceCardName, controller.Name, t.Definition.Name, delta, t.CurrentVitality))
 			var targetSnap *CardInstance
@@ -2081,6 +2512,9 @@ func (g *GameState) findCardAnywhere(instanceID string) *CardInstance {
 		if p == nil {
 			continue
 		}
+		if p.Leader != nil && p.Leader.InstanceID == instanceID {
+			return p.Leader
+		}
 		if c, _, _ := g.findBoardCard(p, instanceID); c != nil {
 			return c
 		}
@@ -2107,22 +2541,29 @@ func (g *GameState) destroyBoardCard(p *PlayerState, instanceID string) {
 		p.AlliedDeathsThisTurn++
 	}
 
-	// Reset card vitality when leaving the board; tokens do not go to discard pile
-	card.CurrentVitality = card.BaseVitality
+	// Reset card vitality and armor to base definition when leaving the board
+	card.BaseVitality = card.Definition.Vitality
+	card.CurrentVitality = card.Definition.Vitality
+	card.BaseArmor = card.Definition.Armor
+	card.CurrentArmor = card.Definition.Armor
 	card.PlayedThisTurn = false
 	card.MovedThisTurn = false
 	card.AttackedThisTurn = false
 	card.UsedAbilityThisTurn = false
 	card.SacrificeAtTurnEnd = false
 	card.ShieldActive = false
-	if !card.Definition.IsToken {
+	if card.Definition.IsCommander {
+		card.Zone = ZoneLeader
+		card.FaceDown = true
+		p.Leader = card
+	} else if !card.Definition.IsToken {
 		card.Zone = ZoneDiscard
 		p.Discard = append(p.Discard, card)
 	}
 
 	// Queue "Al morir" (on_death) abilities when destroyed on the board
 	for _, ab := range card.Definition.Abilities {
-		if ab.Trigger == TriggerOnDeath {
+		if ab.Trigger == TriggerOnDeath && g.checkAbilityConditions(p, ab) {
 			for _, step := range ab.Steps {
 				g.EffectQueue = append(g.EffectQueue, QueuedEffect{
 					ControllerID:    p.ID,
@@ -2152,15 +2593,22 @@ func (g *GameState) discardCardFromHand(p *PlayerState, instanceID string, sourc
 	}
 
 	p.Hand = append(p.Hand[:handIdx], p.Hand[handIdx+1:]...)
-	card.Zone = ZoneDiscard
-	card.CurrentVitality = card.BaseVitality
+	card.BaseVitality = card.Definition.Vitality
+	card.CurrentVitality = card.Definition.Vitality
+	card.BaseArmor = card.Definition.Armor
+	card.CurrentArmor = card.Definition.Armor
 	card.PlayedThisTurn = false
 	card.MovedThisTurn = false
 	card.AttackedThisTurn = false
 	card.UsedAbilityThisTurn = false
 	card.SacrificeAtTurnEnd = false
 	card.ShieldActive = false
-	if !card.Definition.IsToken {
+	if card.Definition.IsCommander {
+		card.Zone = ZoneLeader
+		card.FaceDown = true
+		p.Leader = card
+	} else if !card.Definition.IsToken {
+		card.Zone = ZoneDiscard
 		p.Discard = append(p.Discard, card)
 	}
 
@@ -2178,7 +2626,7 @@ func (g *GameState) discardCardFromHand(p *PlayerState, instanceID string, sourc
 
 	// Trigger "Al descartar" (on_discard) abilities on the discarded card itself
 	for _, ab := range card.Definition.Abilities {
-		if ab.Trigger == TriggerOnDiscard {
+		if ab.Trigger == TriggerOnDiscard && g.checkAbilityConditions(p, ab) {
 			for _, step := range ab.Steps {
 				g.EffectQueue = append(g.EffectQueue, QueuedEffect{
 					ControllerID:    p.ID,
@@ -2196,7 +2644,7 @@ func (g *GameState) discardCardFromHand(p *PlayerState, instanceID string, sourc
 	g.queueBoardTriggers(p, TriggerOnAnyDiscard)
 }
 
-func (g *GameState) moveCardToZone(p *PlayerState, instanceID string, dest ZoneID) {
+func (g *GameState) moveCardToZone(p *PlayerState, instanceID string, dest ZoneID, targetIndex ...int) {
 	var card *CardInstance
 	leftDiscard := false
 
@@ -2205,6 +2653,9 @@ func (g *GameState) moveCardToZone(p *PlayerState, instanceID string, dest ZoneI
 		card = bCard
 		row := p.Board[bZone]
 		p.Board[bZone] = append(row[:bPos], row[bPos+1:]...)
+	} else if p.Leader != nil && p.Leader.InstanceID == instanceID {
+		card = p.Leader
+		p.Leader = nil
 	} else {
 		removeFromSlice := func(slice *[]*CardInstance) *CardInstance {
 			for i, c := range *slice {
@@ -2233,7 +2684,10 @@ func (g *GameState) moveCardToZone(p *PlayerState, instanceID string, dest ZoneI
 	}
 
 	card.Zone = dest
-	card.CurrentVitality = card.BaseVitality
+	card.BaseVitality = card.Definition.Vitality
+	card.CurrentVitality = card.Definition.Vitality
+	card.BaseArmor = card.Definition.Armor
+	card.CurrentArmor = card.Definition.Armor
 	card.PlayedThisTurn = false
 	card.MovedThisTurn = false
 	card.AttackedThisTurn = false
@@ -2246,7 +2700,11 @@ func (g *GameState) moveCardToZone(p *PlayerState, instanceID string, dest ZoneI
 			p.Hand = append(p.Hand, card)
 		}
 	case ZoneDiscard:
-		if !card.Definition.IsToken {
+		if card.Definition.IsCommander {
+			card.Zone = ZoneLeader
+			card.FaceDown = true
+			p.Leader = card
+		} else if !card.Definition.IsToken {
 			p.Discard = append(p.Discard, card)
 		}
 	case ZoneExile:
@@ -2257,6 +2715,9 @@ func (g *GameState) moveCardToZone(p *PlayerState, instanceID string, dest ZoneI
 		if !card.Definition.IsToken {
 			p.Deck = append(p.Deck, card)
 		}
+	case ZoneLeader:
+		card.Zone = ZoneLeader
+		p.Leader = card
 	case ZoneCity, ZoneRoad, ZoneCombat:
 		if len(p.Board[dest]) >= g.maxUnitsPerZone() {
 			for _, fallback := range []ZoneID{ZoneCity, ZoneRoad, ZoneCombat} {
@@ -2270,7 +2731,7 @@ func (g *GameState) moveCardToZone(p *PlayerState, instanceID string, dest ZoneI
 		if len(p.Board[dest]) < g.maxUnitsPerZone() {
 			card.PlayedThisTurn = true
 			card.ShieldActive = card.Definition.HasShield
-			p.Board[dest] = append(p.Board[dest], card)
+			p.Board[dest] = insertCardInBoardRow(p.Board[dest], card, false, targetIndex...)
 		}
 	}
 }
@@ -2283,40 +2744,7 @@ func (g *GameState) BuildPlayerView(playerID string) (*PlayerGameView, error) {
 	}
 
 	sanitizePlayer := func(p *PlayerState, includeHand bool) SanitizedPlayerView {
-		view := SanitizedPlayerView{
-			ID:                p.ID,
-			Name:              p.Name,
-			DevelopmentPoints: p.DevelopmentPoints,
-			CitizenCount:      p.TotalCitizensOnBoard(),
-			MulliganDone:      p.MulliganDone,
-			DeckCount:         len(p.Deck),
-			HandCount:         len(p.Hand),
-			Discard:           make([]CardInstance, 0, len(p.Discard)),
-			Exile:             make([]CardInstance, 0, len(p.Exile)),
-			Board: map[ZoneID][]CardInstance{
-				ZoneCity:   {},
-				ZoneRoad:   {},
-				ZoneCombat: {},
-			},
-		}
-		if includeHand {
-			view.Hand = make([]CardInstance, 0, len(p.Hand))
-			for _, c := range p.Hand {
-				view.Hand = append(view.Hand, c.Clone())
-			}
-		}
-		for _, c := range p.Discard {
-			view.Discard = append(view.Discard, c.Clone())
-		}
-		for _, c := range p.Exile {
-			view.Exile = append(view.Exile, c.Clone())
-		}
-		for _, z := range []ZoneID{ZoneCity, ZoneRoad, ZoneCombat} {
-			for _, c := range p.Board[z] {
-				view.Board[z] = append(view.Board[z], c.Clone())
-			}
-		}
-		return view
+		return sanitizePlayerState(p, includeHand)
 	}
 
 	var oppView *SanitizedPlayerView
@@ -2361,6 +2789,12 @@ func (g *GameState) BuildPlayerView(playerID string) (*PlayerGameView, error) {
 		})
 	}
 
+	var activeEventCopy *ActiveEventView
+	if g.ActiveEvent != nil {
+		ae := *g.ActiveEvent
+		activeEventCopy = &ae
+	}
+
 	return &PlayerGameView{
 		GameID:              g.ID,
 		GameName:            g.GameName,
@@ -2376,6 +2810,7 @@ func (g *GameState) BuildPlayerView(playerID string) (*PlayerGameView, error) {
 		CanPlayInCombatZone: g.CanPlayInCombat(playerID),
 		ValidCombatTargets:  g.ValidCombatTargetIDs(playerID),
 		PendingPrompt:       promptCopy,
+		ActiveEvent:         activeEventCopy,
 		You:                 sanitizePlayer(you, true),
 		Opponent:            oppView,
 		WinnerID:            g.WinnerID,
@@ -2518,6 +2953,8 @@ func zoneDisplayName(z ZoneID) string {
 		return "el Descarte"
 	case ZoneExile:
 		return "la Trituradora"
+	case ZoneLeader:
+		return "la Zona de Líder"
 	default:
 		return string(z)
 	}

@@ -13,6 +13,14 @@ import {
   exportCollectionToCode,
   importShareCode,
   resetCollectionToDefaults,
+  permanentlyDeleteCard,
+  deleteDeck,
+  getCardLayoutConfig,
+  saveCardLayoutConfig,
+  getLastSelectedDeckId,
+  saveLastSelectedDeckId,
+  getLastSelectedAiDeckId,
+  saveLastSelectedAiDeckId,
 } from './storage';
 import { CardDefinition, DeckPreset } from '../types/game';
 
@@ -212,5 +220,74 @@ describe('localStorage Card & Deck Studio Service', () => {
     const collImport = importShareCode(collCode, 'overwrite');
     expect(collImport.totalCards).toBe(baseCount + 2);
     expect(collImport.importedDecks).toBeGreaterThanOrEqual(3);
+  });
+
+  it('supports permanent deletion of any card and deck, layout config, and persisted deck selection', () => {
+    const initialCards = getAllCards();
+    const initialDecks = getAllDecks();
+
+    // Permanently delete a canonical card ('caballero_galardonado')
+    const afterDelCard = permanentlyDeleteCard('caballero_galardonado');
+    expect(afterDelCard.length).toBe(initialCards.length - 1);
+    expect(afterDelCard.some((c) => c.id === 'caballero_galardonado')).toBe(false);
+    // Also removed from all decks
+    for (const d of getAllDecks()) {
+      expect(d.cards.some((c) => c.id === 'caballero_galardonado')).toBe(false);
+    }
+
+    // Permanently delete a canonical deck
+    const firstDeckId = initialDecks[0].id;
+    const afterDelDeck = deleteDeck(firstDeckId);
+    expect(afterDelDeck.some((d) => d.id === firstDeckId)).toBe(false);
+
+    // Resetting collection restores deleted canonical cards and decks
+    const resetRes = resetCollectionToDefaults();
+    expect(resetRes.cards.some((c) => c.id === 'caballero_galardonado')).toBe(true);
+    expect(resetRes.decks.some((d) => d.id === firstDeckId)).toBe(true);
+
+    // Persist and read last selected deck & AI deck
+    saveLastSelectedDeckId('deck_alpha');
+    saveLastSelectedAiDeckId('deck_beta');
+    expect(getLastSelectedDeckId()).toBe('deck_alpha');
+    expect(getLastSelectedAiDeckId()).toBe('deck_beta');
+
+    // Persist and read card layout configuration
+    saveCardLayoutConfig({
+      cardWidthPx: 230,
+      cardHeightPx: 330,
+      artHeightPct: 48,
+      imageFit: 'contain',
+      titleFontSizePx: 13,
+      bodyFontSizePx: 11,
+      bodyTextAlign: 'justify',
+      bodyFontFamily: 'sans',
+    });
+    const layout = getCardLayoutConfig();
+    expect(layout.cardWidthPx).toBe(230);
+    expect(layout.imageFit).toBe('contain');
+    expect(layout.bodyTextAlign).toBe('justify');
+
+    // Conditional ability description generation
+    const desc = generateCardDescription([
+      {
+        trigger: 'activated_wear',
+        wearCost: 2,
+        oncePerTurn: true,
+        conditionEnemyMorePoints: true,
+        conditionDiscardMinCitizens: 3,
+        steps: [
+          {
+            op: 'modify_stat',
+            statTarget: 'armor',
+            amount: 2,
+            target: { requirement: 'self', owner: 'self' },
+          },
+        ],
+      },
+    ]);
+    expect(desc).toContain('Desgaste 2:');
+    expect(desc).toContain('si el oponente tiene más puntos de Desarrollo');
+    expect(desc).toContain('si tenés al menos 3 ciudadano(s) en tu descarte');
+    expect(desc).toContain('+2A');
   });
 });

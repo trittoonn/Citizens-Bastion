@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { FileDown, Grid, Printer, Ruler, Sparkles, X } from 'lucide-react';
-import { CardDefinition, DeckPreset } from '../types/game';
+import { CardDefinition, DeckPreset, resolveCardPlanetColor } from '../types/game';
 import { CardArt } from './CardArt';
 import { renderCardIcon } from './CardView';
 
@@ -524,8 +524,13 @@ export const DeckPrintModal: React.FC<DeckPrintModalProps> = ({ deck, onClose })
 
                   const isCitizen = card.type === 'citizen';
                   const isTool = card.type === 'tool';
-                  const hasStat = isCitizen || isTool;
-                  const statSuffix = isTool ? 'A' : 'V';
+                  const showVitalityTopLeft = isCitizen;
+                  const armorVal = isTool ? card.armor || card.vitality : card.armor || 0;
+                  const showArmorBottomLeft = isTool || armorVal > 0;
+                  const planetColor = resolveCardPlanetColor(card);
+                  const subtypeLabel =
+                    card.subtype ||
+                    (card.isLocation ? 'Locación' : card.isCommander ? 'Comandante' : '');
 
                   return (
                     <div
@@ -535,6 +540,7 @@ export const DeckPrintModal: React.FC<DeckPrintModalProps> = ({ deck, onClose })
                         height: `${gridMetrics.heightMm}mm`,
                         WebkitPrintColorAdjust: 'exact',
                         printColorAdjust: 'exact',
+                        ...(planetColor && !inkSaver ? { borderColor: planetColor } : {}),
                       }}
                       className={`relative flex flex-col justify-between p-[2mm] rounded-[2.2mm] select-none box-border overflow-hidden ${
                         showCutGuides
@@ -550,7 +556,7 @@ export const DeckPrintModal: React.FC<DeckPrintModalProps> = ({ deck, onClose })
                           : 'bg-gradient-to-b from-[#1f202e] via-[#171824] to-[#10111a] border-[2px] border-[#94a3b8] text-[#f8fafc]'
                       }`}
                     >
-                      {/* 1. Top Nameplate & Vitality Shield / Event Icon */}
+                      {/* 1. Top Nameplate & Vitality Shield at TOP-LEFT */}
                       <div
                         className={`flex items-center justify-between gap-1 px-1.5 py-0.5 rounded-[1.2mm] border ${
                           inkSaver
@@ -558,28 +564,43 @@ export const DeckPrintModal: React.FC<DeckPrintModalProps> = ({ deck, onClose })
                             : 'bg-[#1f1914] border-[#c59b27]/80 text-[#f7efe0]'
                         }`}
                       >
-                        <span
-                          style={{ fontSize: `${titleFontPt}pt` }}
-                          className="font-display font-bold leading-[1.08] tracking-tight line-clamp-2"
-                        >
-                          {card.name}
-                        </span>
+                        <div className="flex items-center gap-1 min-w-0 flex-1">
+                          {showVitalityTopLeft && (
+                            <div
+                              style={{ fontSize: `${titleFontPt}pt` }}
+                              className={`shrink-0 px-1.5 py-0.5 rounded-[1mm] font-display font-black border ${
+                                inkSaver
+                                  ? 'bg-[#26201a] text-white border-[#14100c]'
+                                  : 'bg-[#f3d46b] text-[#14100c] border-[#fef9c3]'
+                              }`}
+                            >
+                              {card.vitality}V
+                            </div>
+                          )}
 
-                        {hasStat ? (
-                          <div
+                          <span
                             style={{ fontSize: `${titleFontPt}pt` }}
-                            className={`shrink-0 px-1.5 py-0.5 rounded-[1mm] font-display font-black border ${
-                              inkSaver
-                                ? 'bg-[#26201a] text-white border-[#14100c]'
-                                : isTool
-                                ? 'bg-[#cbd5e1] text-[#0f172a] border-[#f8fafc]'
-                                : 'bg-[#f3d46b] text-[#14100c] border-[#fef9c3]'
-                            }`}
+                            className="font-display font-bold leading-[1.08] tracking-tight line-clamp-2"
                           >
-                            {card.vitality}
-                            {statSuffix}
-                          </div>
-                        ) : (
+                            {card.name}
+                          </span>
+                        </div>
+
+                        {card.planet ? (
+                          <span
+                            style={
+                              planetColor && !inkSaver
+                                ? {
+                                    borderColor: planetColor,
+                                    color: planetColor,
+                                  }
+                                : undefined
+                            }
+                            className="shrink-0 text-[5.5pt] font-display font-bold uppercase px-1 py-0.2 rounded-sm border border-[#8c7e70]"
+                          >
+                            {card.planet}
+                          </span>
+                        ) : !showVitalityTopLeft && !showArmorBottomLeft ? (
                           <span
                             className={`shrink-0 ${
                               inkSaver ? 'text-[#26201a]' : 'text-[#e2e8f0]'
@@ -587,7 +608,7 @@ export const DeckPrintModal: React.FC<DeckPrintModalProps> = ({ deck, onClose })
                           >
                             {renderCardIcon(card.artIcon, 'w-3.5 h-3.5')}
                           </span>
-                        )}
+                        ) : null}
                       </div>
 
                       {/* 2. Card Artwork Box */}
@@ -600,7 +621,7 @@ export const DeckPrintModal: React.FC<DeckPrintModalProps> = ({ deck, onClose })
                         <CardArt card={card} className="w-full h-full" />
                       </div>
 
-                      {/* 3. Type Ribbon */}
+                      {/* 3. Type & Subtype Ribbon */}
                       <div
                         className={`px-1 py-0.5 border-y flex items-center justify-between font-display uppercase tracking-wider text-[6pt] font-bold ${
                           inkSaver
@@ -615,22 +636,24 @@ export const DeckPrintModal: React.FC<DeckPrintModalProps> = ({ deck, onClose })
                         <span className="truncate">
                           {card.isToken
                             ? 'Ficha • Ciudadano'
-                            : card.isCommander
-                            ? 'Comandante • Ciudadano'
-                            : card.isLocation
-                            ? 'Locación • Herramienta'
                             : isCitizen
-                            ? 'Ciudadano • Bastión'
+                            ? subtypeLabel
+                              ? `Ciudadano • ${subtypeLabel}`
+                              : 'Ciudadano'
                             : isTool
-                            ? 'Herramienta • Bastión'
-                            : 'Evento • Efecto'}
+                            ? subtypeLabel
+                              ? `Herramienta • ${subtypeLabel}`
+                              : 'Herramienta'
+                            : subtypeLabel
+                            ? `Evento • ${subtypeLabel}`
+                            : 'Evento'}
                         </span>
                         <span className="shrink-0 ml-1">
                           #{globalCardNumber}/{allCardInstances.length}
                         </span>
                       </div>
 
-                      {/* 4. Rules & Description Box */}
+                      {/* 4. Rules & Description Box + Armor (A) at BOTTOM-LEFT */}
                       <div
                         className={`mt-0.5 flex-1 rounded-[1.2mm] border p-1 flex flex-col justify-between overflow-hidden ${
                           inkSaver
@@ -652,7 +675,20 @@ export const DeckPrintModal: React.FC<DeckPrintModalProps> = ({ deck, onClose })
                               : 'border-[#3a322a] text-[#8c7e70]'
                           }`}
                         >
-                          <span>Citizens' Bastion</span>
+                          {showArmorBottomLeft ? (
+                            <div
+                              style={{ fontSize: `${Math.max(6.5, titleFontPt - 0.5)}pt` }}
+                              className={`shrink-0 px-1.5 py-0.2 rounded-[1mm] font-display font-black border ${
+                                inkSaver
+                                  ? 'bg-[#26201a] text-white border-[#14100c]'
+                                  : 'bg-[#cbd5e1] text-[#0f172a] border-[#f8fafc]'
+                              }`}
+                            >
+                              {armorVal}A
+                            </div>
+                          ) : (
+                            <span>Citizens' Bastion</span>
+                          )}
                           <span className="truncate max-w-[60%]">{deck.name}</span>
                         </div>
                       </div>

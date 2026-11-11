@@ -23,7 +23,11 @@ import { DEFAULT_RULES_CONFIG } from '../services/defaults';
 import {
   getAllDecks,
   getDeckConstraints,
+  getLastSelectedAiDeckId,
+  getLastSelectedDeckId,
   getPlayerSession,
+  saveLastSelectedAiDeckId,
+  saveLastSelectedDeckId,
   savePlayerSession,
 } from '../services/storage';
 import { createLobby, fetchLobbies, joinLobby } from '../services/api';
@@ -69,13 +73,37 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
 }) => {
   const [session, setSession] = useState(() => getPlayerSession());
   const [decks] = useState<DeckPreset[]>(() => getAllDecks());
-  const [selectedDeckId, setSelectedDeckId] = useState<string>(
-    () => getAllDecks()[0]?.id || ''
-  );
+  const [selectedDeckId, setSelectedDeckId] = useState<string>(() => {
+    const all = getAllDecks();
+    const saved = getLastSelectedDeckId();
+    if (saved && all.some((d) => d.id === saved)) {
+      return saved;
+    }
+    return all[0]?.id || '';
+  });
   const [selectedAiDeckId, setSelectedAiDeckId] = useState<string>(() => {
     const all = getAllDecks();
+    const saved = getLastSelectedAiDeckId();
+    if (
+      saved &&
+      (saved === '__random__' ||
+        saved === '__auto__' ||
+        all.some((d) => d.id === saved))
+    ) {
+      return saved;
+    }
     return all[1]?.id || all[0]?.id || '__auto__';
   });
+
+  const handleSelectDeck = (deckId: string) => {
+    setSelectedDeckId(deckId);
+    saveLastSelectedDeckId(deckId);
+  };
+
+  const handleSelectAiDeck = (deckId: string) => {
+    setSelectedAiDeckId(deckId);
+    saveLastSelectedAiDeckId(deckId);
+  };
 
   const [gameName, setGameName] = useState('');
   const [vsAi, setVsAi] = useState(false);
@@ -163,6 +191,10 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
         aiDifficulty: vsAi ? aiDifficulty : '',
       });
 
+      saveLastSelectedDeckId(selectedDeck.id);
+      if (vsAi) {
+        saveLastSelectedAiDeckId(selectedAiDeckId);
+      }
       savePlayerSession({ ...session, activeLobbyId: res.lobby.id });
       onEnterGame(res.lobby.id, res.view);
     } catch (err: any) {
@@ -183,6 +215,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
         playerName: session.playerName.trim() || 'Comandante',
         deck: selectedDeck.cards,
       });
+      saveLastSelectedDeckId(selectedDeck.id);
       savePlayerSession({ ...session, activeLobbyId: lobbyId });
       onEnterGame(lobbyId, view);
     } catch (err: any) {
@@ -224,7 +257,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
           </label>
           <select
             value={selectedDeck?.id || ''}
-            onChange={(e) => setSelectedDeckId(e.target.value)}
+            onChange={(e) => handleSelectDeck(e.target.value)}
             className="w-full px-3.5 py-2.5 rounded bg-[#14110e] border border-[#574c3f] font-display text-sm text-[#e3c158] font-bold focus:border-[#c59b27] focus:outline-none shadow-inner"
           >
             {decks.map((d) => (
@@ -329,7 +362,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                 </label>
                 <select
                   value={selectedDeck?.id || ''}
-                  onChange={(e) => setSelectedDeckId(e.target.value)}
+                  onChange={(e) => handleSelectDeck(e.target.value)}
                   className="w-full px-3 py-2 rounded bg-[#120f0d] border border-[#6b5a48] font-display text-xs font-bold text-[#f3ead8] focus:border-[#c59b27] focus:outline-none shadow-inner"
                 >
                   {decks.map((d) => (
@@ -347,7 +380,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                   </label>
                   <select
                     value={selectedAiDeckId}
-                    onChange={(e) => setSelectedAiDeckId(e.target.value)}
+                    onChange={(e) => handleSelectAiDeck(e.target.value)}
                     className="w-full px-3 py-2 rounded bg-[#120f0d] border border-[#8c3b3b] font-display text-xs font-bold text-[#fecaca] focus:border-[#f87171] focus:outline-none shadow-inner"
                   >
                     {decks.map((d) => (

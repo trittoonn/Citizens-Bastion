@@ -4,17 +4,22 @@ import { CardDefinition } from '../types/game';
 interface CardArtProps {
   card: CardDefinition;
   className?: string;
+  imageFit?: 'cover' | 'contain' | 'fill';
 }
 
-export const CardArt: React.FC<CardArtProps> = ({ card, className = 'w-full h-full' }) => {
-  // If the user supplied a custom image URL in the Card Studio, render it directly
+export const CardArt: React.FC<CardArtProps> = ({ card, className = 'w-full h-full', imageFit }) => {
+  const fit = imageFit || card.layout?.imageFit || 'cover';
+  const fitClass =
+    fit === 'contain' ? 'object-contain' : fit === 'fill' ? 'object-fill' : 'object-cover';
+
+  // If the user supplied a custom image URL or local file Data URL in the Card Studio, render it directly
   if (card.artImage && (card.artImage.startsWith('http') || card.artImage.startsWith('data:'))) {
     return (
       <div className={`relative overflow-hidden bg-slate-950 ${className}`}>
         <img
           src={card.artImage}
           alt={card.name}
-          className="w-full h-full object-cover"
+          className={`w-full h-full ${fitClass}`}
         />
         <div className="absolute inset-0 shadow-[inset_0_0_18px_rgba(0,0,0,0.75)] pointer-events-none" />
       </div>

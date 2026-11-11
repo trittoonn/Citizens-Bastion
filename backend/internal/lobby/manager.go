@@ -40,9 +40,10 @@ const (
 type ActionRequest struct {
 	PlayerID        string      `json:"playerId"`
 	Type            ActionType  `json:"type"`
-	CardInstanceIDs []string    `json:"cardInstanceIds,omitempty"` // Used by MULLIGAN
+	CardInstanceIDs []string    `json:"cardInstanceIds,omitempty"` // Used by MULLIGAN, SELECT_TARGET (multi)
 	CardInstanceID  string      `json:"cardInstanceId,omitempty"`  // Used by PLAY_CARD, MOVE_CITIZEN
-	TargetZone      game.ZoneID `json:"targetZone,omitempty"`      // Used by PLAY_CARD, MOVE_CITIZEN
+	TargetZone      game.ZoneID `json:"targetZone,omitempty"`      // Used by PLAY_CARD, MOVE_CITIZEN, SELECT_TARGET (zone)
+	TargetIndex     *int        `json:"targetIndex,omitempty"`     // Used by PLAY_CARD, MOVE_CITIZEN, SELECT_TARGET (zone)
 	AttackerID      string      `json:"attackerId,omitempty"`      // Used by ATTACK
 	DefenderID      string      `json:"defenderId,omitempty"`      // Used by ATTACK
 	TargetCardID    string      `json:"targetCardId,omitempty"`    // Used by SELECT_TARGET
@@ -198,15 +199,31 @@ func (m *Manager) SubmitAction(lobbyID string, req ActionRequest) (*game.PlayerG
 	case ActionMulligan:
 		actionErr = entry.state.ApplyMulligan(req.PlayerID, req.CardInstanceIDs)
 	case ActionPlayCard:
-		actionErr = entry.state.PlayCard(req.PlayerID, req.CardInstanceID, req.TargetZone)
+		if req.TargetIndex != nil {
+			actionErr = entry.state.PlayCard(req.PlayerID, req.CardInstanceID, req.TargetZone, *req.TargetIndex)
+		} else {
+			actionErr = entry.state.PlayCard(req.PlayerID, req.CardInstanceID, req.TargetZone)
+		}
 	case ActionMoveCitizen:
-		actionErr = entry.state.MoveCitizen(req.PlayerID, req.CardInstanceID, req.TargetZone)
+		if req.TargetIndex != nil {
+			actionErr = entry.state.MoveCitizen(req.PlayerID, req.CardInstanceID, req.TargetZone, *req.TargetIndex)
+		} else {
+			actionErr = entry.state.MoveCitizen(req.PlayerID, req.CardInstanceID, req.TargetZone)
+		}
 	case ActionAttack:
 		actionErr = entry.state.AttackCitizen(req.PlayerID, req.AttackerID, req.DefenderID)
 	case ActionActivateAbility:
 		actionErr = entry.state.ActivateCardAbility(req.PlayerID, req.CardInstanceID)
 	case ActionSelectTarget:
-		actionErr = entry.state.SubmitPromptTargets(req.PlayerID, req.TargetCardID, req.CardInstanceIDs)
+		targetID := req.TargetCardID
+		if targetID == "" && req.TargetZone != "" {
+			targetID = string(req.TargetZone)
+		}
+		if req.TargetIndex != nil {
+			actionErr = entry.state.SubmitPromptTargets(req.PlayerID, targetID, req.CardInstanceIDs, *req.TargetIndex)
+		} else {
+			actionErr = entry.state.SubmitPromptTargets(req.PlayerID, targetID, req.CardInstanceIDs)
+		}
 	case ActionEndTurn:
 		actionErr = entry.state.EndTurn(req.PlayerID)
 	default:

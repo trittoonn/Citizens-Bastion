@@ -697,7 +697,7 @@ export const DEFAULT_CARDS: CardDefinition[] = [
         steps: [
           {
             op: 'move_zone',
-            destZone: 'same_row',
+            destZone: 'any_row',
             shuffleDeck: true,
             target: {
               requirement: 'single_card',
@@ -852,7 +852,7 @@ export const DEFAULT_CARDS: CardDefinition[] = [
         steps: [
           {
             op: 'summon_token',
-            destZone: 'same_row',
+            destZone: 'any_row',
             scaleCountByAlliedDeathsThisTurn: true,
             tokenDef: {
               id: 'token_zombie',

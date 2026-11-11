@@ -1,6 +1,7 @@
 import {
   Ability,
   CardDefinition,
+  CardLayoutConfig,
   DeckConstraints,
   DeckPreset,
   EffectStep,
@@ -10,10 +11,123 @@ import { DEFAULT_CARDS, DEFAULT_DECKS, DEFAULT_RULES_CONFIG } from './defaults';
 const KEYS = {
   CUSTOM_CARDS: 'cb_custom_cards_v1',
   COLLECTION_OVERRIDE: 'cb_collection_override_v1',
+  DELETED_CARDS: 'cb_deleted_card_ids_v1',
   DECKS: 'cb_decks_v1',
+  DELETED_DECKS: 'cb_deleted_deck_ids_v1',
+  SELECTED_DECK: 'cb_selected_deck_id_v1',
+  SELECTED_AI_DECK: 'cb_selected_ai_deck_id_v1',
+  CARD_LAYOUT: 'cb_card_layout_config_v1',
   CONSTRAINTS: 'cb_deck_constraints_v1',
   SESSION: 'cb_player_session_v1',
 };
+
+export const DEFAULT_CARD_LAYOUT_CONFIG: Required<CardLayoutConfig> = {
+  cardWidthPx: 208,
+  cardHeightPx: 304,
+  artHeightPct: 38,
+  imageFit: 'cover',
+  titleFontSizePx: 14,
+  bodyFontSizePx: 11,
+  bodyTextAlign: 'left',
+  bodyFontFamily: 'sans',
+};
+
+export function getCardLayoutConfig(): Required<CardLayoutConfig> {
+  try {
+    const raw = localStorage.getItem(KEYS.CARD_LAYOUT);
+    if (!raw) return DEFAULT_CARD_LAYOUT_CONFIG;
+    const parsed = JSON.parse(raw);
+    return {
+      ...DEFAULT_CARD_LAYOUT_CONFIG,
+      ...(parsed || {}),
+    };
+  } catch {
+    return DEFAULT_CARD_LAYOUT_CONFIG;
+  }
+}
+
+export function saveCardLayoutConfig(config: CardLayoutConfig): Required<CardLayoutConfig> {
+  const merged: Required<CardLayoutConfig> = {
+    ...DEFAULT_CARD_LAYOUT_CONFIG,
+    ...config,
+  };
+  localStorage.setItem(KEYS.CARD_LAYOUT, JSON.stringify(merged));
+  return merged;
+}
+
+export function getLastSelectedDeckId(): string | null {
+  try {
+    return localStorage.getItem(KEYS.SELECTED_DECK);
+  } catch {
+    return null;
+  }
+}
+
+export function saveLastSelectedDeckId(deckId: string): void {
+  try {
+    if (deckId) {
+      localStorage.setItem(KEYS.SELECTED_DECK, deckId);
+    }
+  } catch {
+    // Ignore
+  }
+}
+
+export function getLastSelectedAiDeckId(): string | null {
+  try {
+    return localStorage.getItem(KEYS.SELECTED_AI_DECK);
+  } catch {
+    return null;
+  }
+}
+
+export function saveLastSelectedAiDeckId(deckId: string): void {
+  try {
+    if (deckId) {
+      localStorage.setItem(KEYS.SELECTED_AI_DECK, deckId);
+    }
+  } catch {
+    // Ignore
+  }
+}
+
+function getDeletedCardIds(): Set<string> {
+  try {
+    const raw = localStorage.getItem(KEYS.DELETED_CARDS);
+    if (!raw) return new Set();
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? new Set(arr) : new Set();
+  } catch {
+    return new Set();
+  }
+}
+
+function saveDeletedCardIds(ids: Set<string>): void {
+  try {
+    localStorage.setItem(KEYS.DELETED_CARDS, JSON.stringify(Array.from(ids)));
+  } catch {
+    // Ignore
+  }
+}
+
+function getDeletedDeckIds(): Set<string> {
+  try {
+    const raw = localStorage.getItem(KEYS.DELETED_DECKS);
+    if (!raw) return new Set();
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? new Set(arr) : new Set();
+  } catch {
+    return new Set();
+  }
+}
+
+function saveDeletedDeckIds(ids: Set<string>): void {
+  try {
+    localStorage.setItem(KEYS.DELETED_DECKS, JSON.stringify(Array.from(ids)));
+  } catch {
+    // Ignore
+  }
+}
 
 export interface PlayerSession {
   playerId: string;
@@ -62,6 +176,7 @@ export function getCustomCards(): CardDefinition[] {
 
 export function getAllCards(): CardDefinition[] {
   const custom = getCustomCards();
+  const deleted = getDeletedCardIds();
   let base: CardDefinition[] = DEFAULT_CARDS;
   try {
     const rawOverride = localStorage.getItem(KEYS.COLLECTION_OVERRIDE);
@@ -77,15 +192,25 @@ export function getAllCards(): CardDefinition[] {
 
   const map = new Map<string, CardDefinition>();
   for (const c of base) {
-    map.set(c.id, c);
+    if (!deleted.has(c.id)) {
+      map.set(c.id, c);
+    }
   }
   for (const c of custom) {
-    map.set(c.id, { ...c, isCustom: true });
+    if (!deleted.has(c.id)) {
+      map.set(c.id, { ...c, isCustom: true });
+    }
   }
   return Array.from(map.values());
 }
 
 export function saveCustomCard(card: CardDefinition): CardDefinition[] {
+  const deleted = getDeletedCardIds();
+  if (deleted.has(card.id)) {
+    deleted.delete(card.id);
+    saveDeletedCardIds(deleted);
+  }
+
   const savedCard: CardDefinition = { ...card, isCustom: true };
   const custom = getCustomCards().filter((c) => c.id !== card.id);
   const updated = [...custom, savedCard];
@@ -170,12 +295,53 @@ export function deleteCustomCard(cardId: string): CardDefinition[] {
   return getAllCards();
 }
 
+/**
+ * Permanently deletes ANY card (both custom and default/canonical) from the user's collection
+ * and removes it from all existing decks.
+ */
+export function permanentlyDeleteCard(cardId: string): CardDefinition[] {
+  const deleted = getDeletedCardIds();
+  deleted.add(cardId);
+  saveDeletedCardIds(deleted);
+
+  const custom = getCustomCards().filter((c) => c.id !== cardId);
+  localStorage.setItem(KEYS.CUSTOM_CARDS, JSON.stringify(custom));
+
+  try {
+    const rawOverride = localStorage.getItem(KEYS.COLLECTION_OVERRIDE);
+    if (rawOverride !== null) {
+      const parsed: CardDefinition[] = JSON.parse(rawOverride);
+      if (Array.isArray(parsed)) {
+        const nextOverride = parsed.filter((c) => c.id !== cardId);
+        localStorage.setItem(KEYS.COLLECTION_OVERRIDE, JSON.stringify(nextOverride));
+      }
+    }
+  } catch {
+    // Ignore
+  }
+
+  try {
+    const currentDecks = getAllDecks();
+    const syncedDecks = currentDecks.map((d) => ({
+      ...d,
+      cards: d.cards.filter((c) => c.id !== cardId),
+    }));
+    localStorage.setItem(KEYS.DECKS, JSON.stringify(syncedDecks));
+  } catch {
+    // Ignore
+  }
+
+  return getAllCards();
+}
+
 export function resetCollectionToDefaults(): {
   cards: CardDefinition[];
   decks: DeckPreset[];
 } {
   localStorage.removeItem(KEYS.COLLECTION_OVERRIDE);
   localStorage.removeItem(KEYS.CUSTOM_CARDS);
+  localStorage.removeItem(KEYS.DELETED_CARDS);
+  localStorage.removeItem(KEYS.DELETED_DECKS);
   localStorage.setItem(KEYS.DECKS, JSON.stringify(DEFAULT_DECKS));
   return {
     cards: getAllCards(),
@@ -185,20 +351,22 @@ export function resetCollectionToDefaults(): {
 
 export function getAllDecks(): DeckPreset[] {
   try {
+    const deletedDecks = getDeletedDeckIds();
     const raw = localStorage.getItem(KEYS.DECKS);
     if (!raw) {
-      localStorage.setItem(KEYS.DECKS, JSON.stringify(DEFAULT_DECKS));
-      return DEFAULT_DECKS;
+      const initial = DEFAULT_DECKS.filter((d) => !deletedDecks.has(d.id));
+      localStorage.setItem(KEYS.DECKS, JSON.stringify(initial));
+      return initial;
     }
     const parsed: DeckPreset[] = JSON.parse(raw);
-    if (!Array.isArray(parsed) || parsed.length === 0) {
+    if (!Array.isArray(parsed)) {
       return DEFAULT_DECKS;
     }
-    // Ensure any newly added official starter deck (such as ingenio_y_chatarra) is present if not overridden
+    // Ensure any newly added official starter deck is present unless permanently deleted by the user
     const existingIds = new Set(parsed.map((d) => d.id));
     let added = false;
     for (const defDeck of DEFAULT_DECKS) {
-      if (!existingIds.has(defDeck.id)) {
+      if (!existingIds.has(defDeck.id) && !deletedDecks.has(defDeck.id)) {
         parsed.push(defDeck);
         added = true;
       }
@@ -213,6 +381,11 @@ export function getAllDecks(): DeckPreset[] {
 }
 
 export function saveDeck(deck: DeckPreset): DeckPreset[] {
+  const deletedDecks = getDeletedDeckIds();
+  if (deletedDecks.has(deck.id)) {
+    deletedDecks.delete(deck.id);
+    saveDeletedDeckIds(deletedDecks);
+  }
   const current = getAllDecks();
   const idx = current.findIndex((d) => d.id === deck.id);
   let next: DeckPreset[];
@@ -227,10 +400,13 @@ export function saveDeck(deck: DeckPreset): DeckPreset[] {
 }
 
 export function deleteDeck(deckId: string): DeckPreset[] {
+  const deletedDecks = getDeletedDeckIds();
+  deletedDecks.add(deckId);
+  saveDeletedDeckIds(deletedDecks);
+
   const current = getAllDecks().filter((d) => d.id !== deckId);
-  const next = current.length > 0 ? current : DEFAULT_DECKS;
-  localStorage.setItem(KEYS.DECKS, JSON.stringify(next));
-  return next;
+  localStorage.setItem(KEYS.DECKS, JSON.stringify(current));
+  return current;
 }
 
 export function getDeckConstraints(): DeckConstraints {
@@ -319,7 +495,11 @@ function describeStep(step: EffectStep): string {
           : step.destZone === 'combat'
           ? 'la Zona de Combate'
           : 'esta fila';
-      let baseText = `Convoca ${count} ${name} (${vit}V) en ${zoneLabel}`;
+      let baseText = step.scaleCountByAlliedDeathsThisTurn
+        ? `Por cada ciudadano aliado que murió este turno, convoca 1 ${name} (${vit}V) en ${zoneLabel}`
+        : step.useStoredVitality
+        ? `Convoca ${count} ${name} con V igual al valor guardado en ${zoneLabel}`
+        : `Convoca ${count} ${name} (${vit}V) en ${zoneLabel}`;
       const deathAb = step.tokenDef?.abilities?.find((a) => a.trigger === 'on_death');
       const deathToken = deathAb?.steps?.find((s) => s.op === 'summon_token')?.tokenDef;
       if (deathToken) {
@@ -332,11 +512,14 @@ function describeStep(step: EffectStep): string {
       return baseText;
     }
     case 'deal_damage': {
-      const amt = step.amount || 1;
+      const amtText = step.useStoredVitality ? 'daño igual a la V guardada' : `${step.amount || 1} de daño`;
       if (step.target?.requirement === 'all_matching') {
-        return `Hace ${amt} de daño a todos los ciudadanos (${ownerLabel}).`;
+        return `Hace ${amtText} a todos los ciudadanos (${ownerLabel}).`;
       }
-      return `Hace ${amt} de daño a un ciudadano ${ownerLabel}.`;
+      if (step.target?.requirement === 'weakest_enemy') {
+        return `Hace ${amtText} al ciudadano enemigo más débil.`;
+      }
+      return `Hace ${amtText} a un ciudadano ${ownerLabel}.`;
     }
     case 'draw_cards': {
       const amt = step.amount || 1;
@@ -369,22 +552,44 @@ function describeStep(step: EffectStep): string {
           : 'el tablero';
       const destLabel =
         step.destZone === 'exile'
-          ? 'el Exilio'
+          ? 'la Trituradora'
           : step.destZone === 'discard'
           ? 'el Descarte'
+          : step.destZone === 'city'
+          ? 'La Ciudad'
+          : step.destZone === 'road'
+          ? 'El Camino'
+          : step.destZone === 'combat'
+          ? 'la Zona de Combate'
           : 'tu mano';
       const shuffleText = step.shuffleDeck ? ' Mezclá tu mazo.' : '';
-      return `Mueve una carta de ${srcLabel} a ${destLabel}.${shuffleText}`;
+      const sacText = step.sacrificeAtTurnEnd ? ' Sacrificala al final del turno.' : '';
+      return `Mueve una carta de ${srcLabel} a ${destLabel}.${shuffleText}${sacText}`;
     }
     case 'destroy': {
+      let text = '';
       if (step.target?.requirement === 'right_neighbor') {
-        return 'Destruí al ciudadano a la derecha de esta carta.';
+        text = 'Destruí al ciudadano a la derecha de esta carta.';
+      } else if (step.target?.onlyLocations) {
+        text = `Destruye una Locación ${ownerLabel}.`;
+      } else {
+        text = `Destruye un ciudadano ${ownerLabel}.`;
       }
-      return `Destruye un ciudadano ${ownerLabel}.`;
+      if (step.grantSelfShieldOnSuccess) {
+        text += ' Si lo hacés, esta carta gana Escudo.';
+      }
+      return text;
     }
     case 'modify_stat': {
+      const statSuffix = step.statTarget === 'armor' ? 'A' : 'V';
       const amt = step.amount || 1;
-      const sign = amt >= 0 ? `+${amt}V` : `${amt}V`;
+      const sign = step.useStoredVitality
+        ? `+X${statSuffix} (V guardada)`
+        : step.scaleByDiscardCitizens
+        ? `+1${statSuffix} por cada ciudadano en tu descarte`
+        : amt >= 0
+        ? `+${amt}${statSuffix}`
+        : `${amt}${statSuffix}`;
       if (step.target?.requirement === 'self_card') {
         return `Este ciudadano gana ${sign}.`;
       }
@@ -394,7 +599,7 @@ function describeStep(step: EffectStep): string {
       return `Triturá hasta ${step.amount || 3} ciudadanos de tu descarte y convoca un Ciudadano con V igual a la suma.`;
     }
     case 'cycle_hand': {
-      return 'Descarta toda tu mano y levanta esa misma cantidad de cartas.';
+      return 'Descarta cualquier cantidad de cartas de tu mano y levanta esa misma cantidad.';
     }
     default:
       return '';
@@ -438,7 +643,7 @@ export function generateCardDescription(
   }
   if (abilities && abilities.length > 0) {
     for (const ab of abilities) {
-      const prefix =
+      let prefix =
         ab.trigger === 'on_play'
           ? 'Al jugar: '
           : ab.trigger === 'on_turn_start'
@@ -456,9 +661,26 @@ export function generateCardDescription(
           : ab.trigger === 'activated_wear'
           ? `Desgaste ${ab.wearCost || 2}: `
           : '';
+      if (ab.wearCost && ab.wearCost > 0 && ab.trigger !== 'activated_wear') {
+        prefix += `Desgaste ${ab.wearCost} — `;
+      }
+      const conds: string[] = [];
+      if (ab.conditionAlliedDiedThisTurn) {
+        conds.push('si un ciudadano aliado murió este turno');
+      }
+      if (ab.conditionCardLeftDiscardThisTurn) {
+        conds.push('si una carta salió de tu descarte este turno');
+      }
+      if (ab.conditionEnemyMorePoints) {
+        conds.push('si el oponente tiene más puntos de Desarrollo');
+      }
+      if (ab.conditionDiscardMinCitizens && ab.conditionDiscardMinCitizens > 0) {
+        conds.push(`si tenés al menos ${ab.conditionDiscardMinCitizens} ciudadano(s) en tu descarte`);
+      }
+      const condPrefix = conds.length > 0 ? `[Condición: ${conds.join(' y ')}] ` : '';
       const stepTexts = ab.steps.map(describeStep).filter(Boolean).join(' ');
       if (stepTexts) {
-        parts.push(`${prefix}${stepTexts}`);
+        parts.push(`${prefix}${condPrefix}${stepTexts}`);
       }
     }
   }

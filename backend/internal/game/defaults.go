@@ -748,7 +748,7 @@ func DefaultCards() []CardDefinition {
 					Steps: []EffectStep{
 						{
 							Op:          EffectMoveZone,
-							DestZone:    ZoneSameRow,
+							DestZone:    ZoneAnyRow,
 							ShuffleDeck: true,
 							Target: TargetRule{
 								Requirement:   TargetReqSingleCard,
@@ -902,7 +902,7 @@ func DefaultCards() []CardDefinition {
 					Steps: []EffectStep{
 						{
 							Op:                               EffectSummonToken,
-							DestZone:                         ZoneSameRow,
+							DestZone:                         ZoneAnyRow,
 							ScaleCountByAlliedDeathsThisTurn: true,
 							TokenDef:                         &zombie,
 						},

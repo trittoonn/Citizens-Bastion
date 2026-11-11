@@ -13,7 +13,9 @@ const (
 	ZoneDeck    ZoneID = "deck"
 	ZoneDiscard ZoneID = "discard"
 	ZoneExile   ZoneID = "exile"
+	ZoneLeader  ZoneID = "leader"   // Zona de Líder (separada de la mano, a la izquierda del tablero)
 	ZoneSameRow ZoneID = "same_row" // Relative zone used by effects like summon_token
+	ZoneAnyRow  ZoneID = "any_row"  // Player chooses which board row (City, Road, or Combat)
 )
 
 // IsBoardZone returns true if the zone is one of the 3 active battlefield rows.
@@ -108,6 +110,7 @@ type TargetRule struct {
 	OnlyLocations       bool              `json:"onlyLocations,omitempty"`       // Only match Tools with IsLocation == true
 	ExcludeSourceCard   bool              `json:"excludeSourceCard,omitempty"`   // Exclude the source card itself (e.g. sacrifice another Citizen)
 	MatchStoredCardType bool              `json:"matchStoredCardType,omitempty"` // Only match the CardType stored by a prior step
+	Random              bool              `json:"random,omitempty"`              // Only select randomly if explicitly true
 	Prompt              string            `json:"prompt,omitempty"`
 }
 
@@ -129,19 +132,21 @@ type TokenTemplate struct {
 
 // EffectStep is a single atomic step inside an Ability.
 type EffectStep struct {
-	Op                              EffectOpType   `json:"op"`
-	Amount                          int            `json:"amount,omitempty"`
-	Target                          TargetRule     `json:"target,omitempty"`
-	DestZone                        ZoneID         `json:"destZone,omitempty"`
-	ShuffleDeck                     bool           `json:"shuffleDeck,omitempty"`
-	TokenDef                        *TokenTemplate `json:"tokenDef,omitempty"`
-	StoreVictimVitality             bool           `json:"storeVictimVitality,omitempty"`             // Stores sacrificed target's V for the next step
-	UseStoredVitality               bool           `json:"useStoredVitality,omitempty"`               // Uses stored V as Amount (damage or stat buff)
-	StoreTargetCardType             bool           `json:"storeTargetCardType,omitempty"`             // Stores discarded target's CardType for the next step
-	GrantSelfShieldOnSuccess        bool           `json:"grantSelfShieldOnSuccess,omitempty"`        // Grants Shield to source card if target was destroyed
-	ScaleByDiscardCitizens          bool           `json:"scaleByDiscardCitizens,omitempty"`          // Scales Amount by count of Citizens in controller's Discard
-	ScaleCountByAlliedDeathsThisTurn bool          `json:"scaleCountByAlliedDeathsThisTurn,omitempty"` // Summons 1 token per allied Citizen death this turn
-	SacrificeAtTurnEnd              bool           `json:"sacrificeAtTurnEnd,omitempty"`              // Marks moved/summoned card to be sacrificed at end of turn
+	Op                               EffectOpType   `json:"op"`
+	Amount                           int            `json:"amount,omitempty"`
+	StatTarget                       string         `json:"statTarget,omitempty"`         // "vitality" (default) or "armor"
+	ModifyBaseVitality               bool           `json:"modifyBaseVitality,omitempty"` // If true, permanently changes BaseVitality even outside the field
+	Target                           TargetRule     `json:"target,omitempty"`
+	DestZone                         ZoneID         `json:"destZone,omitempty"`
+	ShuffleDeck                      bool           `json:"shuffleDeck,omitempty"`
+	TokenDef                         *TokenTemplate `json:"tokenDef,omitempty"`
+	StoreVictimVitality              bool           `json:"storeVictimVitality,omitempty"`              // Stores sacrificed target's V for the next step
+	UseStoredVitality                bool           `json:"useStoredVitality,omitempty"`                // Uses stored V as Amount (damage or stat buff)
+	StoreTargetCardType              bool           `json:"storeTargetCardType,omitempty"`              // Stores discarded target's CardType for the next step
+	GrantSelfShieldOnSuccess         bool           `json:"grantSelfShieldOnSuccess,omitempty"`         // Grants Shield to source card if target was destroyed
+	ScaleByDiscardCitizens           bool           `json:"scaleByDiscardCitizens,omitempty"`           // Scales Amount by count of Citizens in controller's Discard
+	ScaleCountByAlliedDeathsThisTurn bool           `json:"scaleCountByAlliedDeathsThisTurn,omitempty"` // Summons 1 token per allied Citizen death this turn
+	SacrificeAtTurnEnd               bool           `json:"sacrificeAtTurnEnd,omitempty"`               // Marks moved/summoned card to be sacrificed at end of turn
 }
 
 // Ability pairs a trigger with one or more sequential EffectSteps and optional Desgaste/condition metadata.
@@ -151,31 +156,49 @@ type Ability struct {
 	OncePerTurn                      bool         `json:"oncePerTurn,omitempty"`                      // Para habilidades activables una vez por turno
 	ConditionAlliedDiedThisTurn      bool         `json:"conditionAlliedDiedThisTurn,omitempty"`      // Solo se activa si un Ciudadano aliado murió este turno
 	ConditionCardLeftDiscardThisTurn bool         `json:"conditionCardLeftDiscardThisTurn,omitempty"` // Solo se activa si una carta salió de tu Descarte este turno
+	ConditionEnemyMorePoints         bool         `json:"conditionEnemyMorePoints,omitempty"`         // Solo se activa si el oponente tiene más Puntos de Desarrollo
+	ConditionDiscardMinCitizens      int          `json:"conditionDiscardMinCitizens,omitempty"`      // Solo se activa si hay al menos X Ciudadanos en tu Descarte
 	Steps                            []EffectStep `json:"steps"`
+}
+
+// CardLayoutConfig holds optional per-card visual dimensions and text/image formatting.
+type CardLayoutConfig struct {
+	CardWidthPx    int    `json:"cardWidthPx,omitempty"`
+	CardHeightPx   int    `json:"cardHeightPx,omitempty"`
+	ArtHeightPct   int    `json:"artHeightPct,omitempty"`
+	ImageFit       string `json:"imageFit,omitempty"`
+	TitleFontSize  int    `json:"titleFontSizePx,omitempty"`
+	BodyFontSize   int    `json:"bodyFontSizePx,omitempty"`
+	BodyTextAlign  string `json:"bodyTextAlign,omitempty"`
+	BodyFontFamily string `json:"bodyFontFamily,omitempty"`
 }
 
 // CardDefinition is the serializable blueprint of a card (base or custom).
 type CardDefinition struct {
-	ID              string    `json:"id"`
-	Name            string    `json:"name"`
-	Type            CardType  `json:"type"`
-	Vitality        int       `json:"vitality"` // Base Vitality (V) for Citizens / Armor (A) for Tools; 0 for Events
-	Description     string    `json:"description"`
-	Abilities       []Ability `json:"abilities,omitempty"`
-	IsSpy           bool      `json:"isSpy,omitempty"`
-	HasShield       bool      `json:"hasShield,omitempty"`
-	IsDefender      bool      `json:"isDefender,omitempty"`
-	HasQuickAttack  bool      `json:"hasQuickAttack,omitempty"`
-	HasReach        bool      `json:"hasReach,omitempty"`
-	IsCommander     bool      `json:"isCommander,omitempty"`
-	IsLocation      bool      `json:"isLocation,omitempty"`
-	Planet          string    `json:"planet,omitempty"`
-	PlayFromDiscard bool      `json:"playFromDiscard,omitempty"`
-	IsToken         bool      `json:"isToken,omitempty"`
-	IsCustom        bool      `json:"isCustom,omitempty"`
-	ArtColor        string    `json:"artColor,omitempty"`
-	ArtIcon         string    `json:"artIcon,omitempty"`
-	ArtImage        string    `json:"artImage,omitempty"`
+	ID              string            `json:"id"`
+	Name            string            `json:"name"`
+	Type            CardType          `json:"type"`
+	Vitality        int               `json:"vitality"`        // Base Vitality (V) for Citizens / Armor (A) for Tools; 0 for Events
+	Armor           int               `json:"armor,omitempty"` // Optional Armor (A) for Citizens (or Tools)
+	Subtype         string            `json:"subtype,omitempty"`
+	Description     string            `json:"description"`
+	Abilities       []Ability         `json:"abilities,omitempty"`
+	IsSpy           bool              `json:"isSpy,omitempty"`
+	HasShield       bool              `json:"hasShield,omitempty"`
+	IsDefender      bool              `json:"isDefender,omitempty"`
+	HasQuickAttack  bool              `json:"hasQuickAttack,omitempty"`
+	HasReach        bool              `json:"hasReach,omitempty"`
+	IsCommander     bool              `json:"isCommander,omitempty"`
+	IsLocation      bool              `json:"isLocation,omitempty"`
+	Planet          string            `json:"planet,omitempty"`
+	BorderColor     string            `json:"borderColor,omitempty"`
+	Layout          *CardLayoutConfig `json:"layout,omitempty"`
+	PlayFromDiscard bool              `json:"playFromDiscard,omitempty"`
+	IsToken         bool              `json:"isToken,omitempty"`
+	IsCustom        bool              `json:"isCustom,omitempty"`
+	ArtColor        string            `json:"artColor,omitempty"`
+	ArtIcon         string            `json:"artIcon,omitempty"`
+	ArtImage        string            `json:"artImage,omitempty"`
 }
 
 // Validate checks that a CardDefinition is well-formed.
@@ -186,8 +209,11 @@ func (c CardDefinition) Validate() error {
 	if c.Type != CardTypeCitizen && c.Type != CardTypeEvent && c.Type != CardTypeTool {
 		return fmt.Errorf("tipo de carta inválido: %s", c.Type)
 	}
-	if (c.Type == CardTypeCitizen || c.Type == CardTypeTool) && c.Vitality <= 0 {
-		return fmt.Errorf("los Ciudadanos y Herramientas deben tener Vitalidad/Armadura mayor a 0")
+	if c.Type == CardTypeCitizen && c.Vitality <= 0 {
+		return fmt.Errorf("los Ciudadanos deben tener Vitalidad (V) mayor a 0")
+	}
+	if c.Type == CardTypeTool && c.Vitality <= 0 && c.Armor <= 0 {
+		return fmt.Errorf("las Herramientas deben tener Armadura (A) mayor a 0")
 	}
 	return nil
 }

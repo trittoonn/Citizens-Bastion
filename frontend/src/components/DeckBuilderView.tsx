@@ -12,14 +12,21 @@ import {
   Printer,
   RotateCcw,
   Settings2,
+  Sliders,
   Sparkles,
   Trash2,
   Upload,
   X,
 } from 'lucide-react';
-import { CardDefinition, DeckConstraints, DeckPreset } from '../types/game';
 import {
-  deleteCustomCard,
+  CardDefinition,
+  CardLayoutConfig,
+  DeckConstraints,
+  DeckPreset,
+  resolveCardPlanetColor,
+} from '../types/game';
+import {
+  DEFAULT_CARD_LAYOUT_CONFIG,
   deleteDeck,
   exportCardToCode,
   exportCardsToCode,
@@ -27,11 +34,14 @@ import {
   exportDeckToCode,
   getAllCards,
   getAllDecks,
+  getCardLayoutConfig,
   getDeckConstraints,
   ImportCollectionMode,
   importShareCode,
   parseShareCode,
+  permanentlyDeleteCard,
   resetCollectionToDefaults,
+  saveCardLayoutConfig,
   saveCustomCard,
   saveDeck,
   saveDeckConstraints,
@@ -51,6 +61,10 @@ export const DeckBuilderView: React.FC = () => {
   const [constraints, setConstraints] = useState<DeckConstraints>(() =>
     getDeckConstraints()
   );
+  const [layoutConfig, setLayoutConfig] = useState<CardLayoutConfig>(() =>
+    getCardLayoutConfig()
+  );
+  const [showLayoutPanel, setShowLayoutPanel] = useState(false);
   const [showConstraintsPanel, setShowConstraintsPanel] = useState(false);
   const [showCardModal, setShowCardModal] = useState(false);
   const [editingCard, setEditingCard] = useState<CardDefinition | null>(null);
@@ -176,6 +190,18 @@ export const DeckBuilderView: React.FC = () => {
   const handleDeleteCurrentDeck = () => {
     if (!activeDeck) return;
     const next = deleteDeck(activeDeck.id);
+    if (next.length === 0) {
+      const fallbackDeck: DeckPreset = {
+        id: 'deck_' + Math.random().toString(36).substring(2, 8),
+        name: 'Códice #1',
+        description: 'Mazo personalizado forjado en el Bastión.',
+        cards: [],
+      };
+      const withFallback = saveDeck(fallbackDeck);
+      setDecks(withFallback);
+      setSelectedDeckId(fallbackDeck.id);
+      return;
+    }
     setDecks(next);
     setSelectedDeckId(next[0]?.id || '');
   };
@@ -188,10 +214,20 @@ export const DeckBuilderView: React.FC = () => {
     setEditingCard(null);
   };
 
-  const handleDeleteCustomCard = (cardId: string) => {
-    const nextCards = deleteCustomCard(cardId);
+  const handlePermanentlyDeleteCard = (cardId: string) => {
+    const nextCards = permanentlyDeleteCard(cardId);
     setCards(nextCards);
     setDecks(getAllDecks());
+  };
+
+  const updateLayoutConfig = (next: CardLayoutConfig) => {
+    setLayoutConfig(next);
+    saveCardLayoutConfig(next);
+  };
+
+  const handleResetLayoutConfig = () => {
+    setLayoutConfig(DEFAULT_CARD_LAYOUT_CONFIG);
+    saveCardLayoutConfig(DEFAULT_CARD_LAYOUT_CONFIG);
   };
 
   const updateConstraints = (next: DeckConstraints) => {
@@ -300,6 +336,27 @@ export const DeckBuilderView: React.FC = () => {
 
           <div className="flex items-center gap-2 flex-wrap">
             <button
+              type="button"
+              onClick={() => setShowLayoutPanel((v) => !v)}
+              className={`px-3.5 py-2.5 rounded text-xs flex items-center gap-1.5 transition ${
+                showLayoutPanel ? 'btn-war-gold' : 'btn-war-iron border-[#c59b27]/70 text-[#f3d46b]'
+              }`}
+            >
+              <Sliders className="w-4 h-4" />
+              Formato y Dimensiones
+            </button>
+
+            <button
+              type="button"
+              onClick={handleResetToDefaults}
+              title="Restaurar todas las cartas y mazos base eliminados o editados"
+              className="btn-war-iron px-3 py-2.5 rounded text-xs flex items-center gap-1.5 text-[#d6c7b8]"
+            >
+              <RotateCcw className="w-4 h-4 text-[#f3d46b]" />
+              Restaurar Base
+            </button>
+
+            <button
               onClick={() => {
                 setShareFeedback(null);
                 setShareTab('import');
@@ -323,6 +380,264 @@ export const DeckBuilderView: React.FC = () => {
             </button>
           </div>
         </div>
+
+        {/* ===================================================================
+            CARD DIMENSIONS & TEXT/IMAGE FORMATTING STUDIO PANEL
+           =================================================================== */}
+        {showLayoutPanel && (
+          <div className="bastion-panel rounded-lg p-5 space-y-4 border-2 border-[#c59b27]/80">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#574c3f] pb-3">
+              <div>
+                <h3 className="font-display text-sm font-bold text-[#f3d46b] flex items-center gap-2">
+                  <Sliders className="w-4 h-4 text-[#f3d46b]" />
+                  Dimensiones y Formato de Cartas (Texto e Imágenes)
+                </h3>
+                <p className="font-serif text-xs text-[#a89b8c]">
+                  Ajustá las dimensiones de las cartas, la proporción y encuadre de la ilustración y la tipografía y alineación del texto de reglas.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleResetLayoutConfig}
+                className="btn-war-iron px-3 py-1.5 rounded text-xs flex items-center gap-1.5"
+              >
+                <RotateCcw className="w-3.5 h-3.5 text-[#f3d46b]" />
+                Restaurar Formato Original
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 text-xs">
+              {/* 1. Card Width */}
+              <div className="p-3 rounded bg-[#14110e] border border-[#463c32] space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="font-display font-bold text-[#e3c158]">
+                    Ancho de Carta
+                  </span>
+                  <span className="font-mono text-[#f3ead8]">
+                    {layoutConfig.cardWidthPx}px
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={160}
+                  max={280}
+                  step={4}
+                  value={layoutConfig.cardWidthPx}
+                  onChange={(e) =>
+                    updateLayoutConfig({
+                      ...layoutConfig,
+                      cardWidthPx: Number(e.target.value),
+                    })
+                  }
+                  className="w-full accent-[#c59b27]"
+                />
+              </div>
+
+              {/* 2. Card Height */}
+              <div className="p-3 rounded bg-[#14110e] border border-[#463c32] space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="font-display font-bold text-[#e3c158]">
+                    Alto de Carta
+                  </span>
+                  <span className="font-mono text-[#f3ead8]">
+                    {layoutConfig.cardHeightPx}px
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={230}
+                  max={400}
+                  step={4}
+                  value={layoutConfig.cardHeightPx}
+                  onChange={(e) =>
+                    updateLayoutConfig({
+                      ...layoutConfig,
+                      cardHeightPx: Number(e.target.value),
+                    })
+                  }
+                  className="w-full accent-[#c59b27]"
+                />
+              </div>
+
+              {/* 3. Art Height Proportion */}
+              <div className="p-3 rounded bg-[#14110e] border border-[#463c32] space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="font-display font-bold text-[#e3c158]">
+                    Altura de Imagen (%)
+                  </span>
+                  <span className="font-mono text-[#f3ead8]">
+                    {layoutConfig.artHeightPct}%
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={28}
+                  max={62}
+                  step={2}
+                  value={layoutConfig.artHeightPct}
+                  onChange={(e) =>
+                    updateLayoutConfig({
+                      ...layoutConfig,
+                      artHeightPct: Number(e.target.value),
+                    })
+                  }
+                  className="w-full accent-[#c59b27]"
+                />
+              </div>
+
+              {/* 4. Image Fit Mode */}
+              <div className="p-3 rounded bg-[#14110e] border border-[#463c32] space-y-1.5">
+                <span className="font-display font-bold text-[#e3c158] block">
+                  Formato de Imagen
+                </span>
+                <div className="grid grid-cols-3 gap-1">
+                  {(
+                    [
+                      { id: 'cover', label: 'Cubrir' },
+                      { id: 'contain', label: 'Contener' },
+                      { id: 'fill', label: 'Estirar' },
+                    ] as const
+                  ).map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() =>
+                        updateLayoutConfig({ ...layoutConfig, imageFit: opt.id })
+                      }
+                      className={`py-1 rounded font-display text-[10px] font-bold border transition ${
+                        layoutConfig.imageFit === opt.id
+                          ? 'bg-[#2b2216] border-[#c59b27] text-[#fef08a]'
+                          : 'bg-[#1f1a16] border-[#463c32] text-[#a89b8c]'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* 5. Title Font Size */}
+              <div className="p-3 rounded bg-[#14110e] border border-[#463c32] space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="font-display font-bold text-[#e3c158]">
+                    Tamaño Título
+                  </span>
+                  <span className="font-mono text-[#f3ead8]">
+                    {layoutConfig.titleFontSizePx}px
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={9}
+                  max={16}
+                  step={1}
+                  value={layoutConfig.titleFontSizePx}
+                  onChange={(e) =>
+                    updateLayoutConfig({
+                      ...layoutConfig,
+                      titleFontSizePx: Number(e.target.value),
+                    })
+                  }
+                  className="w-full accent-[#c59b27]"
+                />
+              </div>
+
+              {/* 6. Body Text Font Size */}
+              <div className="p-3 rounded bg-[#14110e] border border-[#463c32] space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="font-display font-bold text-[#e3c158]">
+                    Tamaño Texto Reglas
+                  </span>
+                  <span className="font-mono text-[#f3ead8]">
+                    {layoutConfig.bodyFontSizePx}px
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={8}
+                  max={14}
+                  step={0.5}
+                  value={layoutConfig.bodyFontSizePx}
+                  onChange={(e) =>
+                    updateLayoutConfig({
+                      ...layoutConfig,
+                      bodyFontSizePx: Number(e.target.value),
+                    })
+                  }
+                  className="w-full accent-[#c59b27]"
+                />
+              </div>
+
+              {/* 7. Body Text Alignment */}
+              <div className="p-3 rounded bg-[#14110e] border border-[#463c32] space-y-1.5">
+                <span className="font-display font-bold text-[#e3c158] block">
+                  Alineación del Texto
+                </span>
+                <div className="grid grid-cols-3 gap-1">
+                  {(
+                    [
+                      { id: 'left', label: 'Izq.' },
+                      { id: 'center', label: 'Centro' },
+                      { id: 'justify', label: 'Justif.' },
+                    ] as const
+                  ).map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() =>
+                        updateLayoutConfig({
+                          ...layoutConfig,
+                          bodyTextAlign: opt.id,
+                        })
+                      }
+                      className={`py-1 rounded font-display text-[10px] font-bold border transition ${
+                        layoutConfig.bodyTextAlign === opt.id
+                          ? 'bg-[#2b2216] border-[#c59b27] text-[#fef08a]'
+                          : 'bg-[#1f1a16] border-[#463c32] text-[#a89b8c]'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* 8. Body Font Family */}
+              <div className="p-3 rounded bg-[#14110e] border border-[#463c32] space-y-1.5">
+                <span className="font-display font-bold text-[#e3c158] block">
+                  Tipografía del Texto
+                </span>
+                <div className="grid grid-cols-3 gap-1">
+                  {(
+                    [
+                      { id: 'serif', label: 'Serif' },
+                      { id: 'sans', label: 'Sans' },
+                      { id: 'mono', label: 'Mono' },
+                    ] as const
+                  ).map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() =>
+                        updateLayoutConfig({
+                          ...layoutConfig,
+                          bodyFontFamily: opt.id,
+                        })
+                      }
+                      className={`py-1 rounded font-display text-[10px] font-bold border transition ${
+                        layoutConfig.bodyFontFamily === opt.id
+                          ? 'bg-[#2b2216] border-[#c59b27] text-[#fef08a]'
+                          : 'bg-[#1f1a16] border-[#463c32] text-[#a89b8c]'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Filter Tabs */}
         <div className="flex items-center gap-2 flex-wrap">
@@ -356,6 +671,7 @@ export const DeckBuilderView: React.FC = () => {
                 <CardView
                   card={card}
                   size="md"
+                  layoutOverride={layoutConfig}
                   badgeCount={countInDeck}
                   onClick={() => handleAddCardToDeck(card)}
                   footerAction={
@@ -405,19 +721,17 @@ export const DeckBuilderView: React.FC = () => {
                           </>
                         )}
                       </button>
-                      {card.isCustom && (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeleteCustomCard(card.id);
-                          }}
-                          title="Eliminar carta personalizada o restaurar versión original"
-                          className="p-1 rounded-sm bg-[#3b1614] hover:bg-[#571d1a] border border-[#8c2222] text-[#fca5a5]"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      )}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handlePermanentlyDeleteCard(card.id);
+                        }}
+                        title="Borrar permanentemente esta carta de tu colección y mazos"
+                        className="p-1 rounded-sm bg-[#3b1614] hover:bg-[#571d1a] border border-[#8c2222] text-[#fca5a5]"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                   }
                 />
@@ -511,15 +825,13 @@ export const DeckBuilderView: React.FC = () => {
                   className="flex-1 px-2.5 py-1.5 rounded bg-[#14110e] border border-[#463c32] font-display text-xs text-[#e7dfd3] focus:border-[#c59b27] focus:outline-none"
                   placeholder="Nombre del mazo"
                 />
-                {decks.length > 1 && (
-                  <button
-                    onClick={handleDeleteCurrentDeck}
-                    title="Eliminar este mazo"
-                    className="p-1.5 rounded bg-[#3b1614] hover:bg-[#571d1a] border border-[#8c2222] text-[#fca5a5]"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                )}
+                <button
+                  onClick={handleDeleteCurrentDeck}
+                  title="Borrar permanentemente este mazo"
+                  className="p-1.5 rounded bg-[#3b1614] hover:bg-[#571d1a] border border-[#8c2222] text-[#fca5a5]"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
               </div>
             )}
           </div>
@@ -627,19 +939,20 @@ export const DeckBuilderView: React.FC = () => {
               const sample = activeDeck?.cards.find((c) => c.id === cardId);
               if (!sample) return null;
               const isCitizen = sample.type === 'citizen';
+              const isTool = sample.type === 'tool';
+              const planetColor = resolveCardPlanetColor(sample);
 
               return (
                 <div
                   key={cardId}
                   className="group relative flex items-center justify-between rounded overflow-hidden bg-[#16120f] border border-[#574c3f] hover:border-[#c59b27] transition h-11 shadow-md"
                 >
-                  {/* Left: Mini Cropped Artwork + Faction Color Accent */}
+                  {/* Left: Mini Cropped Artwork + Planet/Border Color Accent */}
                   <div className="relative w-20 h-full shrink-0 overflow-hidden">
                     <div
                       className="absolute inset-y-0 left-0 w-1 z-20"
                       style={{
-                        backgroundColor:
-                          sample.artColor || (isCitizen ? '#c59b27' : '#7c3aed'),
+                        backgroundColor: planetColor,
                       }}
                     />
                     <CardArt card={sample} className="w-full h-full opacity-85" />
@@ -657,19 +970,40 @@ export const DeckBuilderView: React.FC = () => {
                     >
                       {sample.name}
                     </div>
-                    <div className="text-[9px] font-display uppercase tracking-wider text-[#a89b8c]">
-                      {isCitizen ? 'Ciudadano' : 'Evento'}
+                    <div className="text-[9px] font-display uppercase tracking-wider text-[#a89b8c] truncate">
+                      {isCitizen
+                        ? `Ciudadano${sample.subtype ? ` • ${sample.subtype}` : ''}`
+                        : isTool
+                        ? `Herramienta${sample.subtype ? ` • ${sample.subtype}` : sample.isLocation ? ' • Locación' : ''}`
+                        : `Evento${sample.subtype ? ` • ${sample.subtype}` : ''}`}
                     </div>
                   </div>
 
-                  {/* Right: Prominent Vitality Shield Badge + Quantity (x2, x3) & +/- Controls */}
-                  <div className="flex items-center gap-1.5 pr-2 shrink-0">
+                  {/* Right: Prominent Vitality/Armor Shield Badge + Quantity (x2, x3) & +/- Controls */}
+                  <div className="flex items-center gap-1 pr-2 shrink-0">
                     {isCitizen ? (
+                      <>
+                        <span
+                          title={`Vitalidad: ${sample.vitality}V`}
+                          className="px-1.5 py-0.5 rounded-sm bg-gradient-to-b from-[#d8b13a] to-[#8a6d1b] border border-[#fef08a]/60 font-display font-black text-[10px] text-[#14100c] shadow"
+                        >
+                          {sample.vitality}V
+                        </span>
+                        {(sample.armor || 0) > 0 && (
+                          <span
+                            title={`Armadura: ${sample.armor}A`}
+                            className="px-1 py-0.5 rounded-sm bg-gradient-to-b from-[#94a3b8] to-[#334155] border border-[#e2e8f0]/60 font-display font-black text-[10px] text-[#f8fafc] shadow"
+                          >
+                            {sample.armor}A
+                          </span>
+                        )}
+                      </>
+                    ) : isTool ? (
                       <span
-                        title={`Vitalidad: ${sample.vitality}V`}
-                        className="px-1.5 py-0.5 rounded-sm bg-gradient-to-b from-[#d8b13a] to-[#8a6d1b] border border-[#fef08a]/60 font-display font-black text-[11px] text-[#14100c] shadow"
+                        title={`Armadura: ${sample.armor ?? sample.vitality ?? 1}A`}
+                        className="px-1.5 py-0.5 rounded-sm bg-gradient-to-b from-[#94a3b8] to-[#334155] border border-[#e2e8f0]/60 font-display font-black text-[10px] text-[#f8fafc] shadow"
                       >
-                        {sample.vitality}V
+                        {sample.armor ?? sample.vitality ?? 1}A
                       </span>
                     ) : (
                       <span className="px-1.5 py-0.5 rounded-sm bg-[#2b2438] border border-[#818cf8]/50 font-display font-bold text-[9px] text-[#c7d2fe]">

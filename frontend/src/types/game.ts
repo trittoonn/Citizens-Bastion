@@ -6,7 +6,9 @@ export type ZoneID =
   | 'deck'
   | 'discard'
   | 'exile'
-  | 'same_row';
+  | 'same_row'
+  | 'leader'
+  | 'any_row';
 
 export type CardType = 'citizen' | 'event' | 'tool';
 
@@ -39,6 +41,7 @@ export type TargetRequirement =
   | 'single_card'
   | 'all_matching'
   | 'self_card'
+  | 'self'
   | 'right_neighbor'
   | 'weakest_enemy';
 
@@ -53,6 +56,7 @@ export interface TargetRule {
   onlyLocations?: boolean;
   excludeSourceCard?: boolean;
   matchStoredCardType?: boolean;
+  random?: boolean;
   prompt?: string;
 }
 
@@ -74,6 +78,7 @@ export interface TokenTemplate {
 export interface EffectStep {
   op: EffectOpType;
   amount?: number;
+  statTarget?: 'vitality' | 'armor';
   target?: TargetRule;
   destZone?: ZoneID;
   shuffleDeck?: boolean;
@@ -85,6 +90,7 @@ export interface EffectStep {
   scaleByDiscardCitizens?: boolean;
   scaleCountByAlliedDeathsThisTurn?: boolean;
   sacrificeAtTurnEnd?: boolean;
+  modifyBaseVitality?: boolean;
 }
 
 export interface Ability {
@@ -93,14 +99,29 @@ export interface Ability {
   oncePerTurn?: boolean;
   conditionAlliedDiedThisTurn?: boolean;
   conditionCardLeftDiscardThisTurn?: boolean;
+  conditionEnemyMorePoints?: boolean;
+  conditionDiscardMinCitizens?: number;
   steps: EffectStep[];
+}
+
+export interface CardLayoutConfig {
+  cardWidthPx?: number;
+  cardHeightPx?: number;
+  artHeightPct?: number;
+  imageFit?: 'cover' | 'contain' | 'fill';
+  titleFontSizePx?: number;
+  bodyFontSizePx?: number;
+  bodyTextAlign?: 'left' | 'center' | 'justify';
+  bodyFontFamily?: 'sans' | 'serif' | 'mono';
 }
 
 export interface CardDefinition {
   id: string;
   name: string;
   type: CardType;
+  subtype?: string;
   vitality: number;
+  armor?: number;
   description: string;
   abilities?: Ability[];
   isSpy?: boolean;
@@ -111,12 +132,32 @@ export interface CardDefinition {
   isCommander?: boolean;
   isLocation?: boolean;
   planet?: string;
+  borderColor?: string;
+  layout?: CardLayoutConfig;
   playFromDiscard?: boolean;
   isToken?: boolean;
   isCustom?: boolean;
   artColor?: string;
   artIcon?: string;
   artImage?: string;
+}
+
+export const PLANET_COLORS: Record<string, string> = {
+  Plutonio: '#a855f7',
+  Vapor: '#f97316',
+  'General / Bastión': '#38bdf8',
+  Bastión: '#38bdf8',
+  General: '#38bdf8',
+};
+
+export function resolveCardPlanetColor(card: Pick<CardDefinition, 'borderColor' | 'planet'>): string | undefined {
+  if (card.borderColor && card.borderColor.trim() !== '') {
+    return card.borderColor.trim();
+  }
+  if (card.planet && PLANET_COLORS[card.planet]) {
+    return PLANET_COLORS[card.planet];
+  }
+  return undefined;
 }
 
 export interface DeckPreset {
@@ -173,6 +214,8 @@ export interface CardInstance {
   definition: CardDefinition;
   baseVitality: number;
   currentVitality: number;
+  baseArmor?: number;
+  currentArmor?: number;
   zone: ZoneID;
   playedThisTurn: boolean;
   movedThisTurn?: boolean;
@@ -180,6 +223,7 @@ export interface CardInstance {
   usedAbilityThisTurn?: boolean;
   sacrificeAtTurnEnd?: boolean;
   shieldActive?: boolean;
+  faceDown?: boolean;
 }
 
 export interface PendingPrompt {
@@ -187,6 +231,7 @@ export interface PendingPrompt {
   sourceCardId: string;
   sourceCardName: string;
   promptText: string;
+  promptType?: 'cards' | 'zone';
   originPhase: GamePhase;
   targetZones: ZoneID[];
   targetOwner: TargetOwner;
@@ -195,6 +240,7 @@ export interface PendingPrompt {
   multiSelect?: boolean;
   minTargets?: number;
   maxTargets?: number;
+  allowSacrificeFallback?: boolean;
 }
 
 export interface LogEntry {
@@ -251,6 +297,7 @@ export interface SanitizedPlayerView {
   deckCount: number;
   handCount: number;
   hand?: CardInstance[];
+  leader?: CardInstance;
   discard: CardInstance[];
   exile: CardInstance[];
   board: Record<'city' | 'road' | 'combat', CardInstance[]>;
@@ -294,6 +341,13 @@ export interface MatchStatsView {
   mostLethalCard?: MatchCardStatView;
 }
 
+export interface ActiveEventView {
+  card: CardDefinition;
+  actorId: string;
+  actorName: string;
+  promptText?: string;
+}
+
 export interface PlayerGameView {
   gameId: string;
   gameName: string;
@@ -309,6 +363,7 @@ export interface PlayerGameView {
   canPlayInCombatZone: boolean;
   validCombatTargets: string[];
   pendingPrompt?: PendingPrompt;
+  activeEvent?: ActiveEventView;
   you: SanitizedPlayerView;
   opponent?: SanitizedPlayerView;
   winnerId?: string;
@@ -346,6 +401,7 @@ export interface ActionRequest {
   cardInstanceIds?: string[];
   cardInstanceId?: string;
   targetZone?: ZoneID;
+  targetIndex?: number;
   attackerId?: string;
   defenderId?: string;
   targetCardId?: string;

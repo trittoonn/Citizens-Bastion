@@ -320,6 +320,9 @@ func (g *GameState) tryAIPlayCard(ai, human *PlayerState, diff AIDifficulty) boo
 	var options []scoredPlay
 
 	candidates := append([]*CardInstance{}, ai.Hand...)
+	if ai.Leader != nil && !ai.Leader.FaceDown {
+		candidates = append(candidates, ai.Leader)
+	}
 	for _, dc := range ai.Discard {
 		if dc.Definition.PlayFromDiscard {
 			candidates = append(candidates, dc)
@@ -468,12 +471,12 @@ func (g *GameState) tryAIPlayCard(ai, human *PlayerState, diff AIDifficulty) boo
 func (g *GameState) evaluateAIEventScore(ai, human *PlayerState, eventCard *CardInstance, diff AIDifficulty) int {
 	switch eventCard.Definition.ID {
 	case "rayo_vengativo":
-		if human.TotalCitizensOnBoard() == 0 {
+		if human.TotalUnitsOnBoard() == 0 {
 			return -1
 		}
 		return 85
 	case "lluvia_acida":
-		if human.TotalCitizensOnBoard() <= ai.TotalCitizensOnBoard() && human.TotalCitizensOnBoard() < 2 {
+		if human.TotalUnitsOnBoard() <= ai.TotalUnitsOnBoard() && human.TotalUnitsOnBoard() < 2 {
 			return -1
 		}
 		return 75
@@ -545,7 +548,7 @@ func (g *GameState) evaluateAIEventScore(ai, human *PlayerState, eventCard *Card
 					if len(cands) == 0 {
 						return -1
 					}
-					if (step.Op == EffectDealDamage || step.Op == EffectDestroy) && step.Target.Owner == TargetOwnerAny && human.TotalCitizensOnBoard() == 0 {
+					if (step.Op == EffectDealDamage || step.Op == EffectDestroy) && step.Target.Owner == TargetOwnerAny && human.TotalUnitsOnBoard() == 0 {
 						return -1
 					}
 				}
@@ -558,6 +561,16 @@ func (g *GameState) evaluateAIEventScore(ai, human *PlayerState, eventCard *Card
 func (g *GameState) chooseAIPromptTarget(ai, human *PlayerState, prompt *PendingPrompt, diff AIDifficulty) string {
 	if len(prompt.ValidTargetIDs) == 0 {
 		return ""
+	}
+	if prompt.PromptType == "zone" {
+		for _, preferred := range []string{string(ZoneRoad), string(ZoneCity), string(ZoneCombat)} {
+			for _, id := range prompt.ValidTargetIDs {
+				if id == preferred {
+					return id
+				}
+			}
+		}
+		return prompt.ValidTargetIDs[0]
 	}
 	if diff == AIDifficultyEasy {
 		return prompt.ValidTargetIDs[g.randIntn(len(prompt.ValidTargetIDs))]
@@ -661,6 +674,13 @@ func (g *GameState) chooseAIPromptTarget(ai, human *PlayerState, prompt *Pending
 
 func (g *GameState) chooseAIPromptMultiTargets(ai, human *PlayerState, prompt *PendingPrompt, diff AIDifficulty) []string {
 	if prompt == nil || len(prompt.ValidTargetIDs) == 0 {
+		return nil
+	}
+
+	if prompt.QueuedStep.Step.Op == EffectMillOrSacrifice {
+		if prompt.MinTargets > 0 && len(prompt.ValidTargetIDs) >= prompt.MinTargets {
+			return append([]string{}, prompt.ValidTargetIDs[:prompt.MinTargets]...)
+		}
 		return nil
 	}
 

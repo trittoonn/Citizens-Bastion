@@ -13,9 +13,16 @@ import {
   Users,
   Zap,
 } from 'lucide-react';
-import { CardDefinition, CardInstance, VitalityMode } from '../types/game';
+import {
+  CardDefinition,
+  CardInstance,
+  CardLayoutConfig,
+  resolveCardPlanetColor,
+  VitalityMode,
+} from '../types/game';
 import { CardArt } from './CardArt';
 import { renderTextWithKeywords } from '../utils/keywords';
+import { getCardLayoutConfig } from '../services/storage';
 
 export type CardSize = 'board' | 'hand' | 'md' | 'lg';
 
@@ -46,6 +53,7 @@ interface CardViewProps {
   canMove?: boolean;
   badgeCount?: number;
   animEffect?: CardAnimEffect;
+  layoutOverride?: CardLayoutConfig;
   onClick?: () => void;
   onMouseEnter?: () => void;
   onMouseLeave?: () => void;
@@ -93,6 +101,7 @@ export const CardView: React.FC<CardViewProps> = ({
   canMove = false,
   badgeCount,
   animEffect,
+  layoutOverride,
   onClick,
   onMouseEnter,
   onMouseLeave,
@@ -101,13 +110,34 @@ export const CardView: React.FC<CardViewProps> = ({
   const effectiveSize: CardSize = size || (compact ? 'board' : 'md');
   const isCitizen = card.type === 'citizen';
   const isTool = card.type === 'tool';
-  const hasUnitStat = isCitizen || isTool;
-  const statSuffix = isTool ? 'A' : 'V';
+
   const baseV = instance ? instance.baseVitality : card.vitality;
   const currentV = instance ? instance.currentVitality : card.vitality;
+
+  // Armor (A) for Tools (primary stat) and Citizens (secondary armor stat when > 0)
+  const baseA = isTool
+    ? instance
+      ? instance.baseArmor || instance.baseVitality
+      : card.armor || card.vitality
+    : instance
+    ? instance.baseArmor ?? (card.armor || 0)
+    : card.armor || 0;
+  const currentA = isTool
+    ? instance
+      ? instance.currentArmor ?? instance.currentVitality
+      : card.armor || card.vitality
+    : instance
+    ? instance.currentArmor ?? (card.armor || 0)
+    : card.armor || 0;
+
+  // V is shown top-left for Citizens; A is shown bottom-left for Tools and for Citizens with Armor > 0
+  const showVitalityTopLeft = isCitizen;
+  const showArmorBottomLeft = isTool || currentA > 0 || (!instance && (card.armor || 0) > 0);
+
   const attackV = isTool ? 0 : vitalityMode === 'base_attack' ? baseV : currentV;
   const isDamaged = Boolean(instance && currentV < baseV);
   const isBuffed = Boolean(instance && currentV > baseV);
+  const isArmorDamaged = Boolean(instance && currentA < baseA);
   const shieldActive = instance ? Boolean(instance.shieldActive) : Boolean(card.hasShield);
   const readyToAttack = Boolean(
     isCitizen && canAttack && instance && !instance.attackedThisTurn && !instance.movedThisTurn
@@ -121,12 +151,34 @@ export const CardView: React.FC<CardViewProps> = ({
       !instance.attackedThisTurn
   );
 
+  // Synced Planet & Border Color
+  const planetColor = resolveCardPlanetColor(card);
+  const subtypeLabel =
+    card.subtype || (card.isLocation ? 'Locación' : card.isCommander ? 'Comandante' : '');
+
+  // Global + per-card layout config
+  const layout = {
+    ...getCardLayoutConfig(),
+    ...(card.layout || {}),
+    ...(layoutOverride || {}),
+  };
+
   // High-contrast metallic bevel frames so cards pop sharply off the dark board
   const outerBevel = isCitizen
     ? 'bg-gradient-to-b from-[#f3d46b] via-[#b88921] to-[#4f390c] border-[#fde68a]/80'
     : isTool
     ? 'bg-gradient-to-b from-[#94a3b8] via-[#475569] to-[#1e293b] border-[#cbd5e1]/85'
     : 'bg-gradient-to-b from-[#e2e8f0] via-[#7c8ea6] to-[#262147] border-[#e2e8f0]/80';
+
+  const customBorderStyle: React.CSSProperties | undefined = planetColor
+    ? {
+        borderColor: planetColor,
+        boxShadow:
+          isSelected || isTargetable
+            ? undefined
+            : `0 0 0 1.5px ${planetColor}, 0 8px 16px rgba(0,0,0,0.8)`,
+      }
+    : undefined;
 
   const statusGlow = isSelected
     ? 'ring-2 ring-[#fef08a] drop-shadow-[0_12px_22px_rgba(227,193,88,0.75)] -translate-y-1.5 z-30'
@@ -166,6 +218,7 @@ export const CardView: React.FC<CardViewProps> = ({
         onClick={onClick}
         onMouseEnter={onMouseEnter}
         onMouseLeave={onMouseLeave}
+        style={customBorderStyle}
         className={`group relative w-[106px] h-[56px] my-1 mx-1 rounded-md p-[2.5px] border ${outerBevel} transition-all duration-150 select-none ${
           onClick ? 'cursor-pointer hover:scale-105 hover:z-30' : ''
         } ${statusGlow} ${animClass}`}
@@ -219,10 +272,10 @@ export const CardView: React.FC<CardViewProps> = ({
         <div className="relative w-full h-full rounded-[3px] overflow-hidden bg-[#14110e] border border-[#3a2f25] flex flex-col justify-end">
           {/* Artwork Background */}
           <div className="absolute inset-0">
-            <CardArt card={card} className="w-full h-full" />
+            <CardArt card={card} className="w-full h-full" imageFit={layout.imageFit} />
           </div>
 
-          {/* Unobstructed Bottom Parchment/Bronze Nameplate (Supports 2 tight lines!) */}
+          {/* Unobstructed Bottom Parchment/Bronze Nameplate */}
           <div className="relative z-10 w-full bg-gradient-to-t from-[#0e0b08] via-[#1c1612]/95 to-[#261f19]/90 border-t border-[#c59b27]/70 px-1 py-0.5 text-center shadow-[0_-4px_10px_rgba(0,0,0,0.85)]">
             <div
               className="font-display font-bold text-[9px] text-[#f7efe0] tracking-tight leading-[1.08] line-clamp-2"
@@ -234,14 +287,12 @@ export const CardView: React.FC<CardViewProps> = ({
           </div>
         </div>
 
-        {/* TOP-LEFT: Forged Metal Shield Emblem for Current Vitality / Armor */}
-        {hasUnitStat && (
+        {/* TOP-LEFT (Arriba a la izquierda): Forged Metal Shield Emblem for Current Vitality (V) */}
+        {showVitalityTopLeft && (
           <div
             title={
-              isTool
-                ? `Herramienta — Armadura actual: ${currentV}A/${baseV}A (No cuenta como Ciudadano ni ataca)`
-                : vitalityMode === 'base_attack'
-                ? `Vitalidad actual: ${currentV}/${baseV} | Daño de ataque: ${attackV}`
+              vitalityMode === 'base_attack'
+                ? `Vitalidad actual: ${currentV}V/${baseV}V | Daño de ataque: ${attackV}`
                 : `Vitalidad (Salud y Daño): ${currentV}V (Base: ${baseV}V)`
             }
             className="absolute -top-1.5 -left-1.5 z-20 flex items-center"
@@ -250,15 +301,7 @@ export const CardView: React.FC<CardViewProps> = ({
               <svg viewBox="0 0 36 42" className="absolute inset-0 w-full h-full">
                 <path
                   d="M18 2 L33 8 L30 26 C28 33 18 39 18 39 C18 39 8 33 6 26 L3 8 Z"
-                  fill={
-                    isDamaged
-                      ? '#7f1d1d'
-                      : isBuffed
-                      ? '#14532d'
-                      : isTool
-                      ? '#1e293b'
-                      : '#26201a'
-                  }
+                  fill={isDamaged ? '#7f1d1d' : isBuffed ? '#14532d' : '#26201a'}
                   stroke={
                     shieldActive
                       ? '#38bdf8'
@@ -266,8 +309,6 @@ export const CardView: React.FC<CardViewProps> = ({
                       ? '#fca5a5'
                       : isBuffed
                       ? '#86efac'
-                      : isTool
-                      ? '#cbd5e1'
                       : '#f3d46b'
                   }
                   strokeWidth="2.8"
@@ -280,18 +321,11 @@ export const CardView: React.FC<CardViewProps> = ({
                 />
               </svg>
               <span
-                className={`relative z-10 font-display font-black text-[10.5px] leading-none ${
-                  isDamaged
-                    ? 'text-[#fecaca]'
-                    : isBuffed
-                    ? 'text-[#bbf7d0]'
-                    : isTool
-                    ? 'text-[#f1f5f9]'
-                    : 'text-[#fef3c7]'
+                className={`relative z-10 font-display font-black text-[10px] leading-none ${
+                  isDamaged ? 'text-[#fecaca]' : isBuffed ? 'text-[#bbf7d0]' : 'text-[#fef3c7]'
                 }`}
               >
-                {currentV}
-                {isTool ? 'A' : ''}
+                {currentV}V
               </span>
             </div>
 
@@ -341,6 +375,24 @@ export const CardView: React.FC<CardViewProps> = ({
                 {attackV}
               </div>
             )}
+          </div>
+        )}
+
+        {/* BOTTOM-LEFT (Abajo a la izquierda): Forged Armor (A) Emblem for Tools and Armored Citizens */}
+        {showArmorBottomLeft && (
+          <div
+            title={
+              isTool
+                ? `Herramienta — Armadura actual: ${currentA}A/${baseA}A`
+                : `Armadura de Ciudadano: ${currentA}A/${baseA}A (absorbe daño antes de la Vitalidad)`
+            }
+            className="absolute -bottom-1.5 -left-1.5 z-20 flex items-center"
+          >
+            <div className="px-1.5 py-0.5 rounded bg-gradient-to-b from-[#334155] to-[#0f172a] border border-[#cbd5e1] text-[9.5px] font-display font-black text-[#f1f5f9] shadow-[0_3px_6px_rgba(0,0,0,0.95)] flex items-center gap-0.5">
+              <span className={isArmorDamaged ? 'text-[#fca5a5]' : 'text-[#e2e8f0]'}>
+                {currentA}A
+              </span>
+            </div>
           </div>
         )}
 
@@ -402,23 +454,48 @@ export const CardView: React.FC<CardViewProps> = ({
   // ===========================================================================
   const dimensions =
     effectiveSize === 'hand'
-      ? 'w-[120px] h-[124px]'
+      ? 'w-[120px] h-[128px]'
       : effectiveSize === 'lg'
       ? 'w-[254px] h-[364px]'
-      : 'w-[206px] h-[298px]';
+      : 'w-[208px] h-[304px]';
 
-  const artHeight =
+  const customDimStyle: React.CSSProperties = {
+    ...(customBorderStyle || {}),
+    ...(effectiveSize === 'md'
+      ? {
+          width: `${layout.cardWidthPx || 208}px`,
+          height: `${layout.cardHeightPx || 304}px`,
+        }
+      : {}),
+  };
+
+  const artHeightStyle: React.CSSProperties | undefined =
     effectiveSize === 'hand'
-      ? 'h-[38px]'
-      : effectiveSize === 'lg'
-      ? 'h-[150px]'
-      : 'h-[116px]';
+      ? undefined
+      : {
+          height: `${layout.artHeightPct || 38}%`,
+        };
+
+  const fontFamilyClass =
+    layout.bodyFontFamily === 'mono'
+      ? 'font-mono'
+      : layout.bodyFontFamily === 'sans'
+      ? 'font-sans'
+      : 'font-serif';
+
+  const textAlignClass =
+    layout.bodyTextAlign === 'center'
+      ? 'text-center'
+      : layout.bodyTextAlign === 'justify'
+      ? 'text-justify'
+      : 'text-left';
 
   return (
     <div
       onClick={onClick}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
+      style={customDimStyle}
       className={`group relative ${dimensions} rounded-lg p-[3px] border ${outerBevel} transition-all duration-200 select-none flex flex-col ${
         onClick ? 'cursor-pointer' : ''
       } ${statusGlow}`}
@@ -432,54 +509,79 @@ export const CardView: React.FC<CardViewProps> = ({
 
       {/* Inner Dark Wood & Aged Leather Card Body */}
       <div className="w-full h-full rounded-[5px] bg-gradient-to-b from-[#28211b] via-[#1c1714] to-[#120f0d] border border-[#e3c158]/45 p-1 flex flex-col justify-between overflow-hidden relative shadow-inner">
-        {/* 1. Top Metallic/Parchment Nameplate Banner (Allows 2 lines with tracking-tight so names never truncate!) */}
+        {/* 1. Top Metallic/Parchment Nameplate Banner — V (Vitality) at TOP-LEFT */}
         <div className="relative z-10 flex items-center justify-between gap-1 px-1.5 py-0.5 rounded-sm bg-gradient-to-r from-[#1f1914] via-[#302720] to-[#1f1914] border border-[#c59b27]/75 shadow-[inset_0_1px_0_rgba(255,255,255,0.14)] min-h-[24px]">
-          <span
-            className={`font-display font-bold text-[#f7efe0] tracking-tight leading-[1.06] line-clamp-2 ${
-              effectiveSize === 'hand'
-                ? 'text-[9px]'
-                : effectiveSize === 'lg'
-                ? 'text-[12.5px]'
-                : 'text-[10.5px]'
-            }`}
-            title={card.name}
-          >
-            {card.name}
-          </span>
+          <div className="flex items-center gap-1 min-w-0 flex-1">
+            {/* TOP-LEFT (Arriba a la izquierda):Vitality (V) badge */}
+            {showVitalityTopLeft && (
+              <div
+                title={`Vitalidad: ${currentV}V`}
+                className={`shrink-0 flex items-center px-1.5 py-0.2 rounded-sm font-display font-black border shadow ${
+                  effectiveSize === 'hand' ? 'text-[9px]' : 'text-[11px]'
+                } ${
+                  isDamaged
+                    ? 'bg-[#7f1d1d] border-[#fca5a5] text-[#fecaca]'
+                    : 'bg-gradient-to-b from-[#f3d46b] to-[#966e15] border-[#fef9c3] text-[#14100c]'
+                }`}
+              >
+                <span>{currentV}V</span>
+              </div>
+            )}
 
-          {/* Compact Top-Right Forged Shield Crest for Citizens/Tools or Arcane Crest for Events */}
-          {hasUnitStat ? (
-            <div
-              className={`shrink-0 flex items-center px-1 py-0.2 rounded-sm font-display font-black border shadow ${
-                effectiveSize === 'hand' ? 'text-[9px]' : 'text-[11px]'
-              } ${
-                isDamaged
-                  ? 'bg-[#7f1d1d] border-[#fca5a5] text-[#fecaca]'
-                  : isTool
-                  ? 'bg-gradient-to-b from-[#cbd5e1] to-[#475569] border-[#f1f5f9] text-[#0f172a]'
-                  : 'bg-gradient-to-b from-[#f3d46b] to-[#966e15] border-[#fef9c3] text-[#14100c]'
+            <span
+              style={
+                effectiveSize !== 'hand' && layout.titleFontSizePx
+                  ? { fontSize: `${effectiveSize === 'lg' ? layout.titleFontSizePx + 2 : layout.titleFontSizePx}px` }
+                  : undefined
+              }
+              className={`font-display font-bold text-[#f7efe0] tracking-tight leading-[1.06] line-clamp-2 ${
+                effectiveSize === 'hand'
+                  ? 'text-[9px]'
+                  : effectiveSize === 'lg'
+                  ? 'text-[12.5px]'
+                  : 'text-[10.5px]'
               }`}
+              title={card.name}
             >
-              <span>
-                {currentV}
-                {statSuffix}
-              </span>
-            </div>
-          ) : (
+              {card.name}
+            </span>
+          </div>
+
+          {/* Top-Right Planet / Icon Crest */}
+          {card.planet && effectiveSize !== 'hand' ? (
+            <span
+              style={
+                planetColor
+                  ? {
+                      borderColor: planetColor,
+                      color: planetColor,
+                      backgroundColor: `${planetColor}22`,
+                    }
+                  : undefined
+              }
+              className="shrink-0 text-[7px] font-display font-bold uppercase px-1 py-0.2 rounded-sm border border-[#e3c158]/50 text-[#f3d46b] bg-[#1a1510]"
+              title={`Planeta: ${card.planet}`}
+            >
+              {card.planet}
+            </span>
+          ) : !showVitalityTopLeft && !showArmorBottomLeft ? (
             <span className="shrink-0 text-[#e2e8f0] pl-0.5">
               {renderCardIcon(card.artIcon, 'w-3 h-3')}
             </span>
-          )}
+          ) : null}
         </div>
 
         {/* 2. Beveled Illustration Frame */}
         <div
-          className={`relative z-10 mt-0.5 ${artHeight} w-full rounded-sm overflow-hidden border border-[#c59b27]/80 shadow-[inset_0_0_12px_rgba(0,0,0,0.9)] shrink-0`}
+          style={artHeightStyle}
+          className={`relative z-10 mt-0.5 ${
+            effectiveSize === 'hand' ? 'h-[36px]' : 'h-[116px]'
+          } w-full rounded-sm overflow-hidden border border-[#c59b27]/80 shadow-[inset_0_0_12px_rgba(0,0,0,0.9)] shrink-0`}
         >
-          <CardArt card={card} className="w-full h-full" />
+          <CardArt card={card} className="w-full h-full" imageFit={layout.imageFit} />
         </div>
 
-        {/* 3. Faction / Type Ribbon */}
+        {/* 3. Faction / Type & Subtype Ribbon */}
         <div className="relative z-10 mt-0.5 px-1 py-0.2 bg-[#16120f] border-y border-[#6b5a48] flex items-center justify-between gap-1">
           <span
             className={`font-display uppercase tracking-wider font-bold truncate ${
@@ -492,15 +594,17 @@ export const CardView: React.FC<CardViewProps> = ({
                 : 'text-[#c7d2fe]'
             }`}
           >
-            {card.isCommander
-              ? 'Comandante • Ciudadano'
-              : card.isLocation
-              ? 'Locación • Herramienta'
-              : isCitizen
-              ? 'Ciudadano • Bastión'
+            {isCitizen
+              ? subtypeLabel
+                ? `Ciudadano • ${subtypeLabel}`
+                : 'Ciudadano'
               : isTool
-              ? 'Herramienta • Bastión'
-              : 'Evento • Efecto'}
+              ? subtypeLabel
+                ? `Herramienta • ${subtypeLabel}`
+                : 'Herramienta'
+              : subtypeLabel
+              ? `Evento • ${subtypeLabel}`
+              : 'Evento'}
           </span>
           <div className="flex items-center gap-0.5 shrink-0 flex-wrap justify-end">
             {card.isCommander && (
@@ -567,10 +671,15 @@ export const CardView: React.FC<CardViewProps> = ({
           </div>
         </div>
 
-        {/* 4. Dark Parchment Rules Text Box */}
+        {/* 4. Dark Parchment Rules Text Box + BOTTOM-LEFT (Abajo a la izquierda) Armor (A) Badge */}
         <div className="relative z-10 mt-0.5 flex-1 rounded-sm bg-gradient-to-b from-[#211b16] to-[#15110e] border border-[#574c3f] p-1 flex flex-col justify-between overflow-hidden shadow-[inset_0_2px_6px_rgba(0,0,0,0.75)]">
           <p
-            className={`font-serif text-[#ede5d8] leading-tight ${
+            style={
+              effectiveSize !== 'hand' && layout.bodyFontSizePx
+                ? { fontSize: `${effectiveSize === 'lg' ? layout.bodyFontSizePx + 2 : layout.bodyFontSizePx}px` }
+                : undefined
+            }
+            className={`${fontFamilyClass} ${textAlignClass} text-[#ede5d8] leading-tight ${
               effectiveSize === 'hand'
                 ? 'text-[8.5px] line-clamp-2'
                 : effectiveSize === 'lg'
@@ -581,9 +690,26 @@ export const CardView: React.FC<CardViewProps> = ({
             {renderTextWithKeywords(card.description)}
           </p>
 
-          {footerAction && (
-            <div className="mt-0.5 pt-0.5 border-t border-[#3a322a]">
-              {footerAction}
+          {(showArmorBottomLeft || footerAction) && (
+            <div className="mt-0.5 pt-0.5 border-t border-[#3a322a] flex items-center justify-between gap-1">
+              {/* BOTTOM-LEFT (Abajo a la izquierda): Armor (A) Badge */}
+              {showArmorBottomLeft ? (
+                <div
+                  title={`Armadura: ${currentA}A`}
+                  className={`shrink-0 flex items-center px-1.5 py-0.2 rounded-sm font-display font-black border shadow ${
+                    effectiveSize === 'hand' ? 'text-[9px]' : 'text-[11px]'
+                  } ${
+                    isArmorDamaged
+                      ? 'bg-[#7f1d1d] border-[#fca5a5] text-[#fecaca]'
+                      : 'bg-gradient-to-b from-[#cbd5e1] to-[#475569] border-[#f1f5f9] text-[#0f172a]'
+                  }`}
+                >
+                  <span>{currentA}A</span>
+                </div>
+              ) : (
+                <div />
+              )}
+              {footerAction && <div className="flex-1">{footerAction}</div>}
             </div>
           )}
         </div>
